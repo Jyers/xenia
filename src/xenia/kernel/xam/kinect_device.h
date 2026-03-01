@@ -173,6 +173,10 @@ class KinectDevice {
                                                             LONG lAngleDegrees);
     HRESULT(STDMETHODCALLTYPE* NuiCameraElevationGetAngle)(
         void* self, LONG* plAngleDegrees);
+    // The two entries below were added in Kinect SDK 1.5 and appear in the
+    // vtable between NuiCameraElevationGetAngle and NuiSetDepthFilter.
+    void* NuiImageGetColorPixelCoordinatesFromDepthPixel;
+    void* NuiImageGetColorPixelCoordinatesFromDepthPixelAtResolution;
     void* NuiSetDepthFilter;
     void* NuiGetDepthFilter;
     void* NuiGetCoordinateMapper;
@@ -238,6 +242,7 @@ class KinectDevice {
   PFN_NuiCreateSensorByIndex fn_nui_create_sensor_by_index_ = nullptr;
 
   void* nui_sensor_ = nullptr;  // raw INuiSensor* (COM ref held)
+  HANDLE skeleton_event_ = INVALID_HANDLE_VALUE;  // signaled when a new skeleton frame is ready
 
   std::thread poll_thread_;
   std::atomic<bool> running_{false};
