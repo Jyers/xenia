@@ -346,7 +346,7 @@ dword_result_t XamUserNuiGetUserIndex_entry(dword_t enrollment_index,
                                              lpdword_t out_user_index) {
   if (out_user_index) {
     // 1-to-1 mapping: enrollment index == user index.
-    *out_user_index = enrollment_index;
+    *out_user_index = enrollment_index.value();
   }
   return X_ERROR_SUCCESS;
 }
@@ -356,7 +356,7 @@ DECLARE_XAM_EXPORT1(XamUserNuiGetUserIndex, kNone, kStub);
 dword_result_t XamUserNuiGetEnrollmentIndex_entry(dword_t user_index,
                                                    lpdword_t out_enrollment_index) {
   if (out_enrollment_index) {
-    *out_enrollment_index = user_index;
+    *out_enrollment_index = user_index.value();
   }
   return X_ERROR_SUCCESS;
 }
