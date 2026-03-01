@@ -218,7 +218,10 @@ class KinectDevice {
   };
 
   // Kinect NUI initialisation flag: only skeleton tracking.
-  static constexpr DWORD kNuiInitFlagUseSkeleton = 0x00000001;
+  // NUI_INITIALIZE_FLAG_USES_SKELETON = 0x00000008.
+  // (0x00000001 is NUI_INITIALIZE_FLAG_USES_DEPTH_AND_PLAYER_INDEX, not
+  // skeleton.)
+  static constexpr DWORD kNuiInitFlagUseSkeleton = 0x00000008;
 
   // Skeleton tracking flags.
   static constexpr DWORD kNuiSkeletonTrackingFlagDefault = 0;

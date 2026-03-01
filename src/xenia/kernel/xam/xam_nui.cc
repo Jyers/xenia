@@ -22,6 +22,7 @@
 #include "xenia/xbox.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 
 namespace xe {
@@ -54,7 +55,17 @@ void XamNuiGetDeviceStatus_entry(pointer_t<X_NUI_DEVICE_STATUS> status_ptr) {
   }
   if (kinect->IsConnected()) {
     status_ptr->status = kNuiDeviceStatusConnected;
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) {
+      XELOGI("Kinect: XamNuiGetDeviceStatus → Connected.");
+    }
     return;
+  }
+  {
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) {
+      XELOGI("Kinect: XamNuiGetDeviceStatus → Not connected.");
+    }
   }
 #endif  // XE_PLATFORM_WIN32
   status_ptr->status = kNuiDeviceStatusNotConnected;
@@ -70,7 +81,17 @@ dword_result_t XamNuiIsDeviceReady_entry(dword_t unk) {
     kinect->Initialize();
   }
   if (kinect->IsReady()) {
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) {
+      XELOGI("Kinect: XamNuiIsDeviceReady → Ready.");
+    }
     return X_ERROR_SUCCESS;
+  }
+  {
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) {
+      XELOGI("Kinect: XamNuiIsDeviceReady → Not ready.");
+    }
   }
 #endif  // XE_PLATFORM_WIN32
   return X_ERROR_DEVICE_NOT_CONNECTED;

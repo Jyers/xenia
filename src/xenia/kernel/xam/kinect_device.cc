@@ -68,8 +68,10 @@ bool KinectDevice::Initialize() {
     return true;
   }
 
+  XELOGI("Kinect: Attempting to initialise Kinect sensor.");
+
   if (!LoadKinectDll()) {
-    XELOGD("Kinect: Kinect10.dll not found — Kinect support unavailable.");
+    XELOGI("Kinect: Kinect10.dll not found — Kinect support unavailable.");
     return false;
   }
 
@@ -77,14 +79,17 @@ bool KinectDevice::Initialize() {
   int sensor_count = 0;
   HRESULT hr = fn_nui_get_sensor_count_(&sensor_count);
   if (FAILED(hr) || sensor_count == 0) {
-    XELOGD("Kinect: No Kinect sensors detected.");
+    XELOGI("Kinect: No Kinect sensors detected (count={}, hr=0x{:08X}).",
+           sensor_count, static_cast<uint32_t>(hr));
     return false;
   }
+  XELOGI("Kinect: {} sensor(s) found.", sensor_count);
 
   // Open the first sensor.
   hr = fn_nui_create_sensor_by_index_(0, &nui_sensor_);
   if (FAILED(hr) || !nui_sensor_) {
-    XELOGD("Kinect: NuiCreateSensorByIndex failed (hr=0x{:08X}).", hr);
+    XELOGE("Kinect: NuiCreateSensorByIndex failed (hr=0x{:08X}).",
+           static_cast<uint32_t>(hr));
     return false;
   }
   connected_ = true;
@@ -92,7 +97,8 @@ bool KinectDevice::Initialize() {
   // Initialise with skeleton tracking only (colour and depth add overhead).
   hr = Vtbl()->NuiInitialize(nui_sensor_, kNuiInitFlagUseSkeleton);
   if (FAILED(hr)) {
-    XELOGD("Kinect: NuiInitialize failed (hr=0x{:08X}).", hr);
+    XELOGE("Kinect: NuiInitialize failed (hr=0x{:08X}).",
+           static_cast<uint32_t>(hr));
     // Still considered connected but not ready.
     return false;
   }
@@ -108,7 +114,8 @@ bool KinectDevice::Initialize() {
   hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, skeleton_event_,
                                           kNuiSkeletonTrackingFlagDefault);
   if (FAILED(hr)) {
-    XELOGD("Kinect: NuiSkeletonTrackingEnable failed (hr=0x{:08X}).", hr);
+    XELOGE("Kinect: NuiSkeletonTrackingEnable failed (hr=0x{:08X}).",
+           static_cast<uint32_t>(hr));
     CloseHandle(skeleton_event_);
     skeleton_event_ = nullptr;
     Vtbl()->NuiShutdown(nui_sensor_);
@@ -197,8 +204,13 @@ void KinectDevice::PollThread() {
 
         {
           std::lock_guard<std::mutex> lock(frame_mutex_);
+          const bool first_frame = !has_frame_;
           latest_frame_ = guest_frame;
           has_frame_ = true;
+          if (first_frame) {
+            XELOGI("Kinect: First skeleton frame received (frame #{}).",
+                   native_frame.dwFrameNumber);
+          }
         }  // frame_mutex_ released before ProcessHudFrame
 
         // Update HUD engagement outside the lock (ProcessHudFrame also locks).
