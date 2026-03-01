@@ -195,9 +195,14 @@ void KinectDevice::PollThread() {
         X_NUI_SKELETON_FRAME guest_frame{};
         ConvertFrame(native_frame, &guest_frame);
 
-        std::lock_guard<std::mutex> lock(frame_mutex_);
-        latest_frame_ = guest_frame;
-        has_frame_ = true;
+        {
+          std::lock_guard<std::mutex> lock(frame_mutex_);
+          latest_frame_ = guest_frame;
+          has_frame_ = true;
+        }  // frame_mutex_ released before ProcessHudFrame
+
+        // Update HUD engagement outside the lock (ProcessHudFrame also locks).
+        ProcessHudFrame(guest_frame);
       }
     }
   }
@@ -225,6 +230,75 @@ uint32_t KinectDevice::GetLastFrameNumber() const {
     return 0;
   }
   return static_cast<uint32_t>(latest_frame_.frame_number);
+}
+
+void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
+  // Pick the first fully-tracked skeleton as the engaged player.
+  // If no fully-tracked skeleton is found, accept a position-only skeleton.
+  uint32_t best_tracking_id = 0;
+  uint32_t best_enrollment_index = kNoEnrolledPlayer;
+
+  // First pass: prefer fully tracked skeletons.
+  for (uint32_t i = 0; i < kNuiSkeletonCount; ++i) {
+    uint32_t state =
+        static_cast<uint32_t>(frame.skeleton_data[i].tracking_state);
+    if (state == X_NUI_SKELETON_TRACKED) {
+      best_tracking_id =
+          static_cast<uint32_t>(frame.skeleton_data[i].tracking_id);
+      best_enrollment_index = i;
+      break;
+    }
+  }
+
+  // Second pass: fall back to position-only if no fully tracked skeleton.
+  if (best_tracking_id == 0) {
+    for (uint32_t i = 0; i < kNuiSkeletonCount; ++i) {
+      uint32_t state =
+          static_cast<uint32_t>(frame.skeleton_data[i].tracking_state);
+      if (state == X_NUI_SKELETON_POSITION_ONLY) {
+        best_tracking_id =
+            static_cast<uint32_t>(frame.skeleton_data[i].tracking_id);
+        best_enrollment_index = i;
+        break;
+      }
+    }
+  }
+
+  std::lock_guard<std::mutex> lock(frame_mutex_);
+  engaged_tracking_id_ = best_tracking_id;
+  engaged_enrollment_index_ =
+      (best_tracking_id != 0) ? best_enrollment_index : kNoEnrolledPlayer;
+}
+
+uint32_t KinectDevice::GetEngagedTrackingId() const {
+  std::lock_guard<std::mutex> lock(frame_mutex_);
+  return engaged_tracking_id_;
+}
+
+void KinectDevice::SetEngagedTrackingId(uint32_t tracking_id) {
+  std::lock_guard<std::mutex> lock(frame_mutex_);
+  engaged_tracking_id_ = tracking_id;
+  if (tracking_id == 0) {
+    engaged_enrollment_index_ = kNoEnrolledPlayer;
+  } else {
+    // Try to find the matching skeleton in the latest frame so the enrollment
+    // index stays consistent with the tracking ID.
+    engaged_enrollment_index_ = 0;  // default to slot 0 if not found
+    if (has_frame_) {
+      for (uint32_t i = 0; i < kNuiSkeletonCount; ++i) {
+        if (static_cast<uint32_t>(latest_frame_.skeleton_data[i].tracking_id) ==
+            tracking_id) {
+          engaged_enrollment_index_ = i;
+          break;
+        }
+      }
+    }
+  }
+}
+
+uint32_t KinectDevice::GetEngagedEnrollmentIndex() const {
+  std::lock_guard<std::mutex> lock(frame_mutex_);
+  return engaged_enrollment_index_;
 }
 
 long KinectDevice::GetCameraElevationAngle() const {

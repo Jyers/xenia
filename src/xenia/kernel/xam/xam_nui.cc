@@ -161,6 +161,151 @@ dword_result_t XamNuiSkeletonGetBestSkeletonIndex_entry() {
 }
 DECLARE_XAM_EXPORT1(XamNuiSkeletonGetBestSkeletonIndex, kNone, kImplemented);
 
+// Returns whether the NUI HUD system is enabled (1 = enabled, 0 = disabled).
+dword_result_t XamNuiHudIsEnabled_entry() {
+#if XE_PLATFORM_WIN32
+  KinectDevice* kinect = KinectDevice::Get();
+  if (kinect->IsConnected()) {
+    return 1;
+  }
+#endif  // XE_PLATFORM_WIN32
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamNuiHudIsEnabled, kNone, kImplemented);
+
+// Processes a skeleton frame through the NUI HUD engagement system.
+// The game provides the skeleton frame (input).  The HUD uses it to
+// determine which player is "engaged" (i.e., interacting with the device).
+void XamNuiHudInterpretFrame_entry(
+    pointer_t<X_NUI_SKELETON_FRAME> frame_ptr) {
+#if XE_PLATFORM_WIN32
+  if (frame_ptr) {
+    KinectDevice* kinect = KinectDevice::Get();
+    if (kinect->IsConnected()) {
+      kinect->ProcessHudFrame(*frame_ptr);
+    }
+  }
+#endif  // XE_PLATFORM_WIN32
+}
+DECLARE_XAM_EXPORT1(XamNuiHudInterpretFrame, kNone, kImplemented);
+
+// Returns the tracking ID of the currently engaged player, or 0 if no one is
+// engaged.
+dword_result_t XamNuiHudGetEngagedTrackingID_entry() {
+#if XE_PLATFORM_WIN32
+  KinectDevice* kinect = KinectDevice::Get();
+  if (kinect->IsConnected()) {
+    return kinect->GetEngagedTrackingId();
+  }
+#endif  // XE_PLATFORM_WIN32
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamNuiHudGetEngagedTrackingID, kNone, kImplemented);
+
+// Allows the game to override the engaged tracking ID.
+void XamNuiHudSetEngagedTrackingID_entry(dword_t tracking_id) {
+#if XE_PLATFORM_WIN32
+  KinectDevice* kinect = KinectDevice::Get();
+  if (kinect->IsConnected()) {
+    kinect->SetEngagedTrackingId(tracking_id);
+  }
+#endif  // XE_PLATFORM_WIN32
+}
+DECLARE_XAM_EXPORT1(XamNuiHudSetEngagedTrackingID, kNone, kImplemented);
+
+// Returns the enrollment (player slot) index for the engaged player, or 0xFF
+// if no one is engaged.
+dword_result_t XamNuiHudGetEngagedEnrollmentIndex_entry() {
+#if XE_PLATFORM_WIN32
+  KinectDevice* kinect = KinectDevice::Get();
+  if (kinect->IsConnected()) {
+    return kinect->GetEngagedEnrollmentIndex();
+  }
+#endif  // XE_PLATFORM_WIN32
+  return KinectDevice::kNoEnrolledPlayer;
+}
+DECLARE_XAM_EXPORT1(XamNuiHudGetEngagedEnrollmentIndex, kNone, kImplemented);
+
+// Called by the game at the start of a camera processing cycle.
+// Fills the provided skeleton frame buffer with the latest sensor data so the
+// game can process it directly.  Returns X_ERROR_SUCCESS on success or
+// X_ERROR_DEVICE_NOT_CONNECTED when no data is available.
+dword_result_t XamNuiNatalCameraUpdateStarting_entry(
+    pointer_t<X_NUI_SKELETON_FRAME> frame_ptr) {
+#if XE_PLATFORM_WIN32
+  KinectDevice* kinect = KinectDevice::Get();
+  if (kinect->IsReady()) {
+    if (frame_ptr) {
+      X_NUI_SKELETON_FRAME frame{};
+      if (kinect->GetSkeletonFrame(&frame)) {
+        *frame_ptr = frame;
+        return X_ERROR_SUCCESS;
+      }
+      // No frame yet — zero the output buffer and still return success so the
+      // game doesn't bail out on startup.
+      frame_ptr.Zero();
+      return X_ERROR_SUCCESS;
+    }
+    return X_ERROR_SUCCESS;
+  }
+#endif  // XE_PLATFORM_WIN32
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamNuiNatalCameraUpdateStarting, kNone, kImplemented);
+
+// Called by the game at the end of a camera processing cycle.
+void XamNuiNatalCameraUpdateComplete_entry() {
+  // Nothing to do on the host side.
+}
+DECLARE_XAM_EXPORT1(XamNuiNatalCameraUpdateComplete, kNone, kImplemented);
+
+// Allows the game to force the Kinect device off.  We intentionally keep the
+// sensor active so it can be re-detected without re-initialisation overhead,
+// and return success so the game does not interpret the call as a failure.
+// The sensor will still appear connected on the next XamNuiGetDeviceStatus call.
+dword_result_t XamNuiSetForceDeviceOff_entry(dword_t force_off) {
+  if (force_off) {
+    XELOGD("Kinect: game requested XamNuiSetForceDeviceOff (sensor kept active).");
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiSetForceDeviceOff, kNone, kImplemented);
+
+// Notifies the system of a player engagement state change.  Used by the game
+// to signal that a specific player index has engaged/disengaged.
+void XamNuiPlayerEngagementUpdate_entry(dword_t user_index, dword_t engaged) {
+  // No state we need to maintain on the host side.
+}
+DECLARE_XAM_EXPORT1(XamNuiPlayerEngagementUpdate, kNone, kImplemented);
+
+// Returns version information for the NUI HUD system.
+// The output format is two 32-bit version numbers (major, minor).
+dword_result_t XamNuiHudGetVersions_entry(lpdword_t major_out,
+                                           lpdword_t minor_out) {
+  // Report a version that games will accept (version 2.0 is Kinect SDK v1.x).
+  if (major_out) {
+    *major_out = 2;
+  }
+  if (minor_out) {
+    *minor_out = 0;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiHudGetVersions, kNone, kImplemented);
+
+// Enables or disables an input filter in the NUI HUD.
+dword_result_t XamNuiHudEnableInputFilter_entry(dword_t enable) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiHudEnableInputFilter, kNone, kImplemented);
+
+// Returns the HUD initialisation flags.
+dword_result_t XamNuiHudGetInitializeFlags_entry() {
+  // Return 0 (default flags - no special modes).
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamNuiHudGetInitializeFlags, kNone, kImplemented);
+
 dword_result_t XamShowNuiTroubleshooterUI_entry(unknown_t unk1, unknown_t unk2,
                                                 unknown_t unk3) {
   // unk1 is 0xFF - possibly user index?

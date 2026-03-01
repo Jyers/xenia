@@ -109,6 +109,19 @@ class KinectDevice {
   // Returns the last valid frame number, or 0 if none.
   uint32_t GetLastFrameNumber() const;
 
+  // Process a skeleton frame to determine the currently engaged player.
+  // Called by XamNuiHudInterpretFrame and the background poll thread.
+  void ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame);
+
+  // Tracking ID of the currently engaged (interacting) player, or 0 if none.
+  uint32_t GetEngagedTrackingId() const;
+  void SetEngagedTrackingId(uint32_t tracking_id);
+
+  // Enrollment index (signed-in player slot) of the engaged player, or
+  // kNoEnrolledPlayer (0xFF) if nobody is engaged.
+  static constexpr uint32_t kNoEnrolledPlayer = 0xFF;
+  uint32_t GetEngagedEnrollmentIndex() const;
+
   // Camera elevation angle in degrees [-27, 27].
   long GetCameraElevationAngle() const;
   bool SetCameraElevationAngle(long degrees);
@@ -225,6 +238,10 @@ class KinectDevice {
   mutable std::mutex frame_mutex_;
   X_NUI_SKELETON_FRAME latest_frame_{};
   bool has_frame_ = false;
+
+  // Engagement state: updated by ProcessHudFrame.
+  uint32_t engaged_tracking_id_ = 0;
+  uint32_t engaged_enrollment_index_ = kNoEnrolledPlayer;
 
   bool connected_ = false;
   bool ready_ = false;
