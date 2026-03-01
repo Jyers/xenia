@@ -94,7 +94,10 @@ bool KinectDevice::Initialize() {
   }
   connected_ = true;
 
-  // Initialise with skeleton tracking only (colour and depth add overhead).
+  // Initialise with depth+player-index AND skeleton tracking.
+  // The depth flag is required even if we never read depth frames: skeleton
+  // tracking internally uses the depth pipeline, and without it
+  // NuiSkeletonTrackingEnable returns E_INVALIDARG (0x80070057).
   hr = Vtbl()->NuiInitialize(nui_sensor_, kNuiInitFlagUseSkeleton);
   if (FAILED(hr)) {
     XELOGE("Kinect: NuiInitialize failed (hr=0x{:08X}).",
