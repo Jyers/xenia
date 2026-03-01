@@ -102,22 +102,18 @@ bool KinectDevice::Initialize() {
     // Still considered connected but not ready.
     return false;
   }
+  XELOGI("Kinect: NuiInitialize succeeded (hr=0x{:08X}).",
+         static_cast<uint32_t>(hr));
 
-  // Create an event that is signalled when a new skeleton frame is available.
-  skeleton_event_ =
-      CreateEventW(nullptr, TRUE /*manual-reset*/, FALSE, nullptr);
-  if (!skeleton_event_) {
-    Vtbl()->NuiShutdown(nui_sensor_);
-    return false;
-  }
-
-  hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, skeleton_event_,
+  // Enable skeleton tracking in polling mode (nullptr event handle).
+  // Passing an explicit event handle to NuiSkeletonTrackingEnable can cause
+  // E_INVALIDARG on certain driver/SDK versions; polling via
+  // NuiSkeletonGetNextFrame with a timeout is equally correct and avoids this.
+  hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, nullptr,
                                           kNuiSkeletonTrackingFlagDefault);
   if (FAILED(hr)) {
     XELOGE("Kinect: NuiSkeletonTrackingEnable failed (hr=0x{:08X}).",
            static_cast<uint32_t>(hr));
-    CloseHandle(skeleton_event_);
-    skeleton_event_ = nullptr;
     Vtbl()->NuiShutdown(nui_sensor_);
     return false;
   }
@@ -145,9 +141,6 @@ void KinectDevice::Shutdown() {
 
   // Stop the polling thread first.
   running_ = false;
-  if (skeleton_event_) {
-    SetEvent(skeleton_event_);  // unblock WaitForSingleObject
-  }
   if (poll_thread_.joinable()) {
     poll_thread_.join();
   }
@@ -160,11 +153,6 @@ void KinectDevice::Shutdown() {
     // Release the COM reference.
     reinterpret_cast<IUnknown*>(nui_sensor_)->Release();
     nui_sensor_ = nullptr;
-  }
-
-  if (skeleton_event_) {
-    CloseHandle(skeleton_event_);
-    skeleton_event_ = nullptr;
   }
 
   ready_ = false;
@@ -184,38 +172,34 @@ void KinectDevice::Shutdown() {
 
 void KinectDevice::PollThread() {
   while (running_) {
-    DWORD wait_result =
-        WaitForSingleObject(skeleton_event_, 100 /*ms timeout*/);
+    // Poll for the next skeleton frame, blocking for up to 100 ms.
+    // NuiSkeletonTrackingEnable was called with nullptr (polling mode), so
+    // NuiSkeletonGetNextFrame waits internally instead of requiring an event.
+    NuiSkeletonFrame native_frame{};
+    HRESULT hr = Vtbl()->NuiSkeletonGetNextFrame(
+        nui_sensor_, 100 /*ms timeout*/, &native_frame);
 
     if (!running_) {
       break;
     }
 
-    if (wait_result == WAIT_OBJECT_0) {
-      ResetEvent(skeleton_event_);
+    if (SUCCEEDED(hr)) {
+      X_NUI_SKELETON_FRAME guest_frame{};
+      ConvertFrame(native_frame, &guest_frame);
 
-      NuiSkeletonFrame native_frame{};
-      HRESULT hr = Vtbl()->NuiSkeletonGetNextFrame(
-          nui_sensor_, 0 /*do not wait*/, &native_frame);
+      {
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        const bool first_frame = !has_frame_;
+        latest_frame_ = guest_frame;
+        has_frame_ = true;
+        if (first_frame) {
+          XELOGI("Kinect: First skeleton frame received (frame #{}).",
+                 native_frame.dwFrameNumber);
+        }
+      }  // frame_mutex_ released before ProcessHudFrame
 
-      if (SUCCEEDED(hr)) {
-        X_NUI_SKELETON_FRAME guest_frame{};
-        ConvertFrame(native_frame, &guest_frame);
-
-        {
-          std::lock_guard<std::mutex> lock(frame_mutex_);
-          const bool first_frame = !has_frame_;
-          latest_frame_ = guest_frame;
-          has_frame_ = true;
-          if (first_frame) {
-            XELOGI("Kinect: First skeleton frame received (frame #{}).",
-                   native_frame.dwFrameNumber);
-          }
-        }  // frame_mutex_ released before ProcessHudFrame
-
-        // Update HUD engagement outside the lock (ProcessHudFrame also locks).
-        ProcessHudFrame(guest_frame);
-      }
+      // Update HUD engagement outside the lock (ProcessHudFrame also locks).
+      ProcessHudFrame(guest_frame);
     }
   }
 }

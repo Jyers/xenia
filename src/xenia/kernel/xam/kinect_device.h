@@ -233,8 +233,6 @@ class KinectDevice {
 
   void* nui_sensor_ = nullptr;  // raw INuiSensor* (COM ref held)
 
-  HANDLE skeleton_event_ = nullptr;
-
   std::thread poll_thread_;
   std::atomic<bool> running_{false};
 
