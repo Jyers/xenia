@@ -176,16 +176,15 @@ DECLARE_XAM_EXPORT1(XamNuiHudIsEnabled, kNone, kImplemented);
 // Processes a skeleton frame through the NUI HUD engagement system.
 // The game provides the skeleton frame (input).  The HUD uses it to
 // determine which player is "engaged" (i.e., interacting with the device).
-void XamNuiHudInterpretFrame_entry(
+// NOTE: We intentionally do not update engagement state here.  The background
+// KinectDevice polling thread is the authoritative source: it receives frames
+// directly from the Kinect SDK and calls ProcessHudFrame on every new frame.
+// Forwarding the game-provided frame here caused the engagement state to be
+// reset to 0 whenever the game passed an empty/uninitialized frame buffer
+// (which happens when XamNuiNatalCameraUpdateStarting has no data yet).
+dword_result_t XamNuiHudInterpretFrame_entry(
     pointer_t<X_NUI_SKELETON_FRAME> frame_ptr) {
-#if XE_PLATFORM_WIN32
-  if (frame_ptr) {
-    KinectDevice* kinect = KinectDevice::Get();
-    if (kinect->IsConnected()) {
-      kinect->ProcessHudFrame(*frame_ptr);
-    }
-  }
-#endif  // XE_PLATFORM_WIN32
+  return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudInterpretFrame, kNone, kImplemented);
 
@@ -305,6 +304,96 @@ dword_result_t XamNuiHudGetInitializeFlags_entry() {
   return 0;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudGetInitializeFlags, kNone, kImplemented);
+
+// ---------------------------------------------------------------------------
+// User-NUI binding: associates signed-in user slots with the Kinect sensor.
+// These are required for the engagement pipeline to know which controller
+// slot corresponds to the person standing in front of the sensor.
+// We maintain a simple 1-to-1 mapping (user index == enrollment index) which
+// is the most common case and sufficient for single-player Kinect games.
+// ---------------------------------------------------------------------------
+
+// Returns the controller slot (user index) that should be bound to the Kinect.
+// The game calls this before XamUserNuiBind to find a free/suitable slot.
+dword_result_t XamUserNuiGetUserIndexForBind_entry() {
+  return 0;  // Default to user 0 (single-player Kinect assumption).
+}
+DECLARE_XAM_EXPORT1(XamUserNuiGetUserIndexForBind, kNone, kStub);
+
+// Returns the controller slot that is recommended for sign-in via Kinect.
+dword_result_t XamUserNuiGetUserIndexForSignin_entry() {
+  return 0;
+}
+DECLARE_XAM_EXPORT1(XamUserNuiGetUserIndexForSignin, kNone, kStub);
+
+// Binds a signed-in user (controller slot) to the Kinect engagement system.
+dword_result_t XamUserNuiBind_entry(dword_t user_index) {
+  XELOGI("Kinect: XamUserNuiBind user_index={}", user_index.value());
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamUserNuiBind, kNone, kStub);
+
+// Unbinds a user from the Kinect engagement system.
+dword_result_t XamUserNuiUnbind_entry(dword_t user_index) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamUserNuiUnbind, kNone, kStub);
+
+// Returns the controller slot (user index) for a given enrollment index.
+// enrollment_index is the skeleton slot (0-5); out_user_index receives the
+// controller slot (0-3) bound to that skeleton.
+dword_result_t XamUserNuiGetUserIndex_entry(dword_t enrollment_index,
+                                             lpdword_t out_user_index) {
+  if (out_user_index) {
+    // 1-to-1 mapping: enrollment index == user index.
+    *out_user_index = enrollment_index;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamUserNuiGetUserIndex, kNone, kStub);
+
+// Returns the enrollment index (skeleton slot) for a given controller slot.
+dword_result_t XamUserNuiGetEnrollmentIndex_entry(dword_t user_index,
+                                                   lpdword_t out_enrollment_index) {
+  if (out_enrollment_index) {
+    *out_enrollment_index = user_index;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamUserNuiGetEnrollmentIndex, kNone, kStub);
+
+// Updates the engagement scoring for a skeleton slot.  The game provides
+// per-skeleton scores that influence which person is selected as "engaged".
+// We don't maintain a score table — engagement is determined by the first
+// tracked skeleton found by the background polling thread.
+dword_result_t XamNuiSkeletonScoreUpdate_entry(unknown_t unk1, unknown_t unk2) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiSkeletonScoreUpdate, kNone, kStub);
+
+// Sets camera flags (e.g. near mode, seated tracking).
+dword_result_t XamNuiCameraSetFlags_entry(dword_t flags) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraSetFlags, kNone, kStub);
+
+// Stores the current floor plane for use in subsequent tracking.
+dword_result_t XamNuiCameraRememberFloor_entry() {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraRememberFloor, kNone, kStub);
+
+// Enables or disables NUI automation (testing/scripted input).
+dword_result_t XamEnableNuiAutomation_entry(dword_t enable) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamEnableNuiAutomation, kNone, kStub);
+
+// Enables or disables Natal playback mode.
+dword_result_t XamEnableNatalPlayback_entry(dword_t enable) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamEnableNatalPlayback, kNone, kStub);
 
 dword_result_t XamShowNuiTroubleshooterUI_entry(unknown_t unk1, unknown_t unk2,
                                                 unknown_t unk3) {

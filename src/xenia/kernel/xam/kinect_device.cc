@@ -243,10 +243,13 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
     uint32_t state =
         static_cast<uint32_t>(frame.skeleton_data[i].tracking_state);
     if (state == X_NUI_SKELETON_TRACKED) {
-      best_tracking_id =
+      uint32_t tid =
           static_cast<uint32_t>(frame.skeleton_data[i].tracking_id);
-      best_enrollment_index = i;
-      break;
+      if (tid != 0) {
+        best_tracking_id = tid;
+        best_enrollment_index = i;
+        break;
+      }
     }
   }
 
@@ -256,15 +259,26 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
       uint32_t state =
           static_cast<uint32_t>(frame.skeleton_data[i].tracking_state);
       if (state == X_NUI_SKELETON_POSITION_ONLY) {
-        best_tracking_id =
+        uint32_t tid =
             static_cast<uint32_t>(frame.skeleton_data[i].tracking_id);
-        best_enrollment_index = i;
-        break;
+        if (tid != 0) {
+          best_tracking_id = tid;
+          best_enrollment_index = i;
+          break;
+        }
       }
     }
   }
 
   std::lock_guard<std::mutex> lock(frame_mutex_);
+  if (best_tracking_id != engaged_tracking_id_) {
+    if (best_tracking_id != 0) {
+      XELOGI("Kinect: Person detected — engaged tracking_id={} slot={}",
+             best_tracking_id, best_enrollment_index);
+    } else {
+      XELOGI("Kinect: Person left — engagement cleared.");
+    }
+  }
   engaged_tracking_id_ = best_tracking_id;
   engaged_enrollment_index_ =
       (best_tracking_id != 0) ? best_enrollment_index : kNoEnrolledPlayer;
