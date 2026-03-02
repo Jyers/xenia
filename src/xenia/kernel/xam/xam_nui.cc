@@ -48,12 +48,18 @@ static_assert(sizeof(X_NUI_DEVICE_STATUS) == 24, "Size matters");
 constexpr uint32_t kNuiDeviceStatusNotConnected = 0;
 constexpr uint32_t kNuiDeviceStatusConnected = 1;
 
-// Xbox 360 system notification ID broadcast when the NUI engagement state
-// changes (player detected or player left).  The data parameter contains the
-// enrollment index of the newly engaged player, or kNoEnrolledPlayer (0xFF)
-// when the engagement is cleared.  mask_index==0, so any listener registered
-// with bit 0 in its mask (the common case) will receive this notification.
-constexpr uint32_t kXNotifySysNuiEngagementChanged = 0x0000001E;
+// Xbox 360 XDK system notification IDs for NUI (Kinect) events.
+// Both are broadcast so games compiled against different SDK versions are
+// covered.  mask_index==0 for both, so any listener with bit 0 set in its
+// mask (the common case for XN_SYS_* events) will receive them.
+//
+// XN_SYS_NUI_ENROLLED (0x1E): biometric / face-recognition enrollment change.
+//   data = enrollment_index (0 for first player, 0xFF when cleared).
+// XN_SYS_NUI_ENGAGED  (0x1F): physical player engagement change — a person
+//   has stepped into (or left) the Kinect field of view.
+//   data = enrollment_index (0 for first player, 0xFF when cleared).
+constexpr uint32_t kXNotifySysNuiEnrolled = 0x0000001E;
+constexpr uint32_t kXNotifySysNuiEngaged  = 0x0000001F;
 
 #if XE_PLATFORM_WIN32
 // Registers the engagement-changed callback on the KinectDevice singleton so
@@ -72,15 +78,22 @@ static void EnsureNuiCallbackRegistered() {
       [ks](uint32_t tracking_id, uint32_t enrollment_index) {
         if (tracking_id != 0) {
           XELOGI(
-              "Kinect: Engagement changed — broadcasting notification "
-              "(tracking_id={} enrollment={})",
+              "Kinect: Broadcasting XN_SYS_NUI_ENGAGED (0x{:08X}) and "
+              "XN_SYS_NUI_ENROLLED (0x{:08X}) — "
+              "tracking_id={} enrollment={}",
+              kXNotifySysNuiEngaged, kXNotifySysNuiEnrolled,
               tracking_id, enrollment_index);
         } else {
           XELOGI(
-              "Kinect: Engagement cleared — broadcasting notification.");
+              "Kinect: Broadcasting XN_SYS_NUI_ENGAGED (0x{:08X}) and "
+              "XN_SYS_NUI_ENROLLED (0x{:08X}) — engagement cleared.",
+              kXNotifySysNuiEngaged, kXNotifySysNuiEnrolled);
         }
-        ks->BroadcastNotification(kXNotifySysNuiEngagementChanged,
-                                  enrollment_index);
+        // Broadcast the physical-engagement notification (0x1F) first as it
+        // is the one most games wait for, then the enrollment notification
+        // (0x1E) for games that track biometric/face state.
+        ks->BroadcastNotification(kXNotifySysNuiEngaged,  enrollment_index);
+        ks->BroadcastNotification(kXNotifySysNuiEnrolled, enrollment_index);
       });
 }
 #endif  // XE_PLATFORM_WIN32
