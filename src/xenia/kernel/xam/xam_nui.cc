@@ -599,6 +599,290 @@ dword_result_t XamEnableNatalPlayback_entry(dword_t enable) {
 }
 DECLARE_XAM_EXPORT1(XamEnableNatalPlayback, kNone, kStub);
 
+// ---------------------------------------------------------------------------
+// Camera tilt / motor control stubs.
+// These control the Kinect's physical tilt motor.  We don't have a real
+// motor to drive, so we stub them all as success.
+// ---------------------------------------------------------------------------
+
+// Registers a callback that the system calls when the tilt status changes.
+dword_result_t XamNuiCameraTiltSetCallback_entry(unknown_t callback,
+                                                  unknown_t context) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraTiltSetCallback (first call, callback ignored)");
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraTiltSetCallback, kNone, kStub);
+
+// Returns the current tilt status.  We report "completed" (0) so the
+// game does not wait for a motor move that will never happen.
+dword_result_t XamNuiCameraTiltGetStatus_entry(lpdword_t status_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraTiltGetStatus → 0 (first call)");
+  }
+  if (status_out) {
+    *status_out = 0;  // 0 = not moving / completed
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraTiltGetStatus, kNone, kStub);
+
+// Reports the tilt status back to the system.
+dword_result_t XamNuiCameraTiltReportStatus_entry(dword_t status) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraTiltReportStatus status={} (first call)",
+           status.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraTiltReportStatus, kNone, kStub);
+
+// Stops any in-progress motor movement.
+dword_result_t XamNuiCameraElevationStopMovement_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraElevationStopMovement (first call)");
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraElevationStopMovement, kNone, kStub);
+
+// Starts an automatic tilt to the optimal angle.
+dword_result_t XamNuiCameraElevationAutoTilt_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraElevationAutoTilt (first call)");
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraElevationAutoTilt, kNone, kStub);
+
+// Registers a callback for elevation-change events.
+dword_result_t XamNuiCameraElevationSetCallback_entry(unknown_t callback,
+                                                       unknown_t context) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraElevationSetCallback (first call, callback ignored)");
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraElevationSetCallback, kNone, kStub);
+
+// Auto-tilts in the opposite direction.
+dword_result_t XamNuiCameraElevationReverseAutoTilt_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraElevationReverseAutoTilt (first call)");
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraElevationReverseAutoTilt, kNone, kStub);
+
+// Adjusts the tilt by a relative amount.
+dword_result_t XamNuiCameraAdjustTilt_entry(int_t delta) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraAdjustTilt delta={} (first call)",
+           delta.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraAdjustTilt, kNone, kStub);
+
+// Returns the type of tilt controller (motor vs. manual).
+// 0 = no motor, 1 = motorised.  We report motorised so games don't try
+// to prompt the user to physically tilt the sensor.
+dword_result_t XamNuiCameraGetTiltControllerType_entry(lpdword_t type_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraGetTiltControllerType → 1 (motorised, first call)");
+  }
+  if (type_out) {
+    *type_out = 1;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiCameraGetTiltControllerType, kNone, kStub);
+
+// ---------------------------------------------------------------------------
+// Biometric / identity stubs.
+// These back the Kinect's face-recognition sign-in system.  We don't
+// implement real biometric matching; all calls succeed immediately.
+// ---------------------------------------------------------------------------
+
+// Returns a session ID for the current NUI identity session.
+// Games use this to correlate face-recognition results with a session.
+dword_result_t XamNuiIdentityGetSessionId_entry(lpdword_t session_id_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityGetSessionId → 1 (first call)");
+  }
+  if (session_id_out) {
+    *session_id_out = 1;  // fixed non-zero session id
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityGetSessionId, kNone, kStub);
+
+// Returns enrollment information for a given enrollment slot.
+dword_result_t XamNuiIdentityGetEnrollmentInfo_entry(dword_t slot,
+                                                      lpvoid_t info_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityGetEnrollmentInfo slot={} (first call)",
+           slot.value());
+  }
+  if (info_out) {
+    // Zero the output buffer.  We don't know the exact size of the structure
+    // on the 360 side, but zeroing a safe minimum (32 bytes) satisfies games
+    // that check individual fields for non-zero values.
+    std::memset(info_out, 0, 32);
+  }
+  return X_ERROR_NOT_FOUND;  // no enrolled faces
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityGetEnrollmentInfo, kNone, kStub);
+
+// Removes a face enrollment entry.
+dword_result_t XamNuiIdentityUnenroll_entry(dword_t slot) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityUnenroll slot={} (first call)", slot.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityUnenroll, kNone, kStub);
+
+// Returns a colour texture generated from the depth image used during
+// face recognition.  We return a null texture pointer.
+dword_result_t XamNuiIdentityGetColorTexture_entry(lpdword_t texture_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityGetColorTexture (first call)");
+  }
+  if (texture_out) {
+    *texture_out = 0;
+  }
+  return X_ERROR_NOT_FOUND;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityGetColorTexture, kNone, kStub);
+
+// Returns a bitmask of quality flags for the current recognition frame.
+dword_result_t XamNuiIdentityGetQualityFlags_entry(lpdword_t flags_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityGetQualityFlags → 0 (first call)");
+  }
+  if (flags_out) {
+    *flags_out = 0;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityGetQualityFlags, kNone, kStub);
+
+// Fills a string buffer with a human-readable description of the quality flags.
+dword_result_t XamNuiIdentityGetQualityFlagsMessage_entry(dword_t flags,
+                                                           lpvoid_t buf_out,
+                                                           dword_t buf_len) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityGetQualityFlagsMessage (first call)");
+  }
+  if (buf_out && buf_len >= 2) {
+    // Write a null wide-char (2 bytes) so the game gets an empty string.
+    *buf_out.as<uint16_t*>() = 0;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityGetQualityFlagsMessage, kNone, kStub);
+
+// Starts an enrollment-for-sign-in session.
+dword_result_t XamNuiIdentityEnrollForSignIn_entry(dword_t user_index,
+                                                    dword_t unk) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityEnrollForSignIn user_index={} (first call)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityEnrollForSignIn, kNone, kStub);
+
+// Attempts to identify the person using biometric (face) data.
+// Returns X_ERROR_NOT_FOUND — no enrolled face to match against.
+dword_result_t XamNuiIdentityIdentifyWithBiometric_entry(lpdword_t result_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityIdentifyWithBiometric → NOT_FOUND (first call)");
+  }
+  if (result_out) {
+    *result_out = 0;
+  }
+  return X_ERROR_NOT_FOUND;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityIdentifyWithBiometric, kNone, kStub);
+
+// Aborts any in-progress identity operation.
+dword_result_t XamNuiIdentityAbort_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiIdentityAbort (first call)");
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamNuiIdentityAbort, kNone, kStub);
+
+// ---------------------------------------------------------------------------
+// Biometric data persistence (per-user face-model store).
+// We return success but supply no data so the game falls back to its
+// unenrolled-user code path rather than crashing.
+// ---------------------------------------------------------------------------
+
+// Reads previously-stored biometric (face model) data for a user.
+dword_result_t XamReadBiometricData_entry(dword_t user_index,
+                                          lpvoid_t buf_out,
+                                          dword_t buf_size,
+                                          lpdword_t bytes_read_out) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamReadBiometricData user_index={} (first call, no data)",
+           user_index.value());
+  }
+  if (bytes_read_out) {
+    *bytes_read_out = 0;
+  }
+  return X_ERROR_NOT_FOUND;  // no stored biometric data
+}
+DECLARE_XAM_EXPORT1(XamReadBiometricData, kNone, kStub);
+
+// Stores biometric (face model) data for a user.
+dword_result_t XamWriteBiometricData_entry(dword_t user_index,
+                                           lpvoid_t buf,
+                                           dword_t buf_size) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamWriteBiometricData user_index={} size={} (first call, data discarded)",
+           user_index.value(), buf_size.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamWriteBiometricData, kNone, kStub);
+
+// Enables or disables biometric (face-recognition) sign-in for a user.
+dword_result_t XamUserNuiEnableBiometric_entry(dword_t user_index,
+                                                dword_t enable) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamUserNuiEnableBiometric user_index={} enable={} (first call)",
+           user_index.value(), enable.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamUserNuiEnableBiometric, kNone, kStub);
+
 dword_result_t XamShowNuiTroubleshooterUI_entry(unknown_t unk1, unknown_t unk2,
                                                 unknown_t unk3) {
   // unk1 is 0xFF - possibly user index?

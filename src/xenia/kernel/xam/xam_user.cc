@@ -57,6 +57,25 @@ X_HRESULT_result_t XamUserGetXUID_entry(dword_t user_index, dword_t type_mask,
 }
 DECLARE_XAM_EXPORT1(XamUserGetXUID, kUserProfiles, kImplemented);
 
+// Reverse-maps a XUID back to a local user index.
+// Returns X_ERROR_SUCCESS and sets *user_index_out to the matching slot,
+// or X_ERROR_NO_SUCH_USER if the XUID does not match any signed-in profile.
+dword_result_t XamUserGetIndexFromXUID_entry(lpqword_t xuid_ptr,
+                                              lpdword_t user_index_out) {
+  if (!xuid_ptr || !user_index_out) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+  const uint64_t xuid = *xuid_ptr;
+  const auto& user_profile = kernel_state()->user_profile();
+  if (xuid != 0 && user_profile && xuid == user_profile->xuid()) {
+    *user_index_out = 0;
+    return X_ERROR_SUCCESS;
+  }
+  *user_index_out = static_cast<uint32_t>(-1);
+  return X_ERROR_NO_SUCH_USER;
+}
+DECLARE_XAM_EXPORT1(XamUserGetIndexFromXUID, kUserProfiles, kImplemented);
+
 dword_result_t XamUserGetSigninState_entry(dword_t user_index) {
   // Yield, as some games spam this.
   xe::threading::MaybeYield();
