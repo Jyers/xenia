@@ -57,7 +57,8 @@ constexpr uint32_t kNuiDeviceStatusConnected = 1;
 //
 // XN_SYS_NUI_ENGAGED  (0x0A000003, local_id=3): physical player engagement
 //   change — a person has stepped into (or left) the Kinect field of view.
-//   data = enrollment_index (0 for first player, 0xFF when cleared).
+//   data = tracking_id of the engaged player (non-zero), or 0 when cleared.
+//   Games check param != 0 to detect engagement.
 // XN_SYS_NUI_ENROLLED (0x0A000002, local_id=2): biometric / face-recognition
 //   enrollment change.
 //   data = enrollment_index (0 for first player, 0xFF when cleared).
@@ -92,10 +93,10 @@ static void EnsureNuiCallbackRegistered() {
               "XN_SYS_NUI_ENROLLED (0x{:08X}) — engagement cleared.",
               kXNotifySysNuiEngaged, kXNotifySysNuiEnrolled);
         }
-        // Broadcast the physical-engagement notification first as it is the
-        // one most games wait for, then the enrollment notification for games
-        // that track biometric/face state.
-        ks->BroadcastNotification(kXNotifySysNuiEngaged,  enrollment_index);
+        // Broadcast the physical-engagement notification first.
+        // data = tracking_id for ENGAGED (non-zero means someone arrived, 0
+        // means cleared), and enrollment_index for ENROLLED (0xFF = cleared).
+        ks->BroadcastNotification(kXNotifySysNuiEngaged,  tracking_id);
         ks->BroadcastNotification(kXNotifySysNuiEnrolled, enrollment_index);
       });
 }
