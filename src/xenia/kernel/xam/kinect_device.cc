@@ -372,18 +372,30 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
     }
   }
 
-  std::lock_guard<std::mutex> lock(frame_mutex_);
-  if (best_tracking_id != engaged_tracking_id_) {
-    if (best_tracking_id != 0) {
-      XELOGI("Kinect: Person detected — engaged tracking_id={} enrollment={}",
-             best_tracking_id, best_enrollment_index);
-    } else {
-      XELOGI("Kinect: Person left — engagement cleared.");
+  bool engagement_changed = false;
+  uint32_t new_enrollment = kNoEnrolledPlayer;
+  EngagementChangedCallback cb;
+  {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    if (best_tracking_id != engaged_tracking_id_) {
+      if (best_tracking_id != 0) {
+        XELOGI("Kinect: Person detected — engaged tracking_id={} enrollment={}",
+               best_tracking_id, best_enrollment_index);
+      } else {
+        XELOGI("Kinect: Person left — engagement cleared.");
+      }
+      engaged_tracking_id_ = best_tracking_id;
+      engaged_enrollment_index_ =
+          (best_tracking_id != 0) ? best_enrollment_index : kNoEnrolledPlayer;
+      new_enrollment = engaged_enrollment_index_;
+      engagement_changed = true;
+      cb = engagement_changed_callback_;
     }
   }
-  engaged_tracking_id_ = best_tracking_id;
-  engaged_enrollment_index_ =
-      (best_tracking_id != 0) ? best_enrollment_index : kNoEnrolledPlayer;
+  // Fire callback outside the lock to avoid potential deadlocks.
+  if (engagement_changed && cb) {
+    cb(best_tracking_id, new_enrollment);
+  }
 }
 
 uint32_t KinectDevice::GetEngagedTrackingId() const {
@@ -417,6 +429,11 @@ void KinectDevice::SetEngagedTrackingId(uint32_t tracking_id) {
 uint32_t KinectDevice::GetEngagedEnrollmentIndex() const {
   std::lock_guard<std::mutex> lock(frame_mutex_);
   return engaged_enrollment_index_;
+}
+
+void KinectDevice::SetEngagementChangedCallback(EngagementChangedCallback cb) {
+  std::lock_guard<std::mutex> lock(frame_mutex_);
+  engagement_changed_callback_ = std::move(cb);
 }
 
 long KinectDevice::GetCameraElevationAngle() const {

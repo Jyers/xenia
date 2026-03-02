@@ -69,6 +69,13 @@ dword_result_t XamTaskSchedule_entry(lpvoid_t callback,
 }
 DECLARE_XAM_EXPORT2(XamTaskSchedule, kNone, kImplemented, kSketchy);
 
+dword_result_t XamTaskCloseHandle_entry(dword_t handle) {
+  // The real implementation would release the task handle allocated by
+  // XamTaskSchedule.  Our stub always returns success.
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XAM_EXPORT2(XamTaskCloseHandle, kNone, kStub, kSketchy);
+
 dword_result_t XamTaskShouldExit_entry(dword_t r3) { return 0; }
 DECLARE_XAM_EXPORT2(XamTaskShouldExit, kNone, kStub, kSketchy);
 

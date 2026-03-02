@@ -48,6 +48,43 @@ static_assert(sizeof(X_NUI_DEVICE_STATUS) == 24, "Size matters");
 constexpr uint32_t kNuiDeviceStatusNotConnected = 0;
 constexpr uint32_t kNuiDeviceStatusConnected = 1;
 
+// Xbox 360 system notification ID broadcast when the NUI engagement state
+// changes (player detected or player left).  The data parameter contains the
+// enrollment index of the newly engaged player, or kNoEnrolledPlayer (0xFF)
+// when the engagement is cleared.  mask_index==0, so any listener registered
+// with bit 0 in its mask (the common case) will receive this notification.
+constexpr uint32_t kXNotifySysNuiEngagementChanged = 0x0000001E;
+
+#if XE_PLATFORM_WIN32
+// Registers the engagement-changed callback on the KinectDevice singleton so
+// that any change in tracked player is broadcast to the notify listener system.
+// Safe to call multiple times; the second and subsequent calls are no-ops.
+static void EnsureNuiCallbackRegistered() {
+  static std::atomic<bool> registered{false};
+  if (registered.exchange(true)) {
+    return;
+  }
+  KinectDevice* kinect = KinectDevice::Get();
+  // kernel_state() is a free function in the parent xe::kernel namespace;
+  // capture it by value so the lambda works correctly from any thread.
+  KernelState* ks = kernel_state();
+  kinect->SetEngagementChangedCallback(
+      [ks](uint32_t tracking_id, uint32_t enrollment_index) {
+        if (tracking_id != 0) {
+          XELOGI(
+              "Kinect: Engagement changed — broadcasting notification "
+              "(tracking_id={} enrollment={})",
+              tracking_id, enrollment_index);
+        } else {
+          XELOGI(
+              "Kinect: Engagement cleared — broadcasting notification.");
+        }
+        ks->BroadcastNotification(kXNotifySysNuiEngagementChanged,
+                                  enrollment_index);
+      });
+}
+#endif  // XE_PLATFORM_WIN32
+
 void XamNuiGetDeviceStatus_entry(pointer_t<X_NUI_DEVICE_STATUS> status_ptr) {
   status_ptr.Zero();
 #if XE_PLATFORM_WIN32
@@ -56,6 +93,9 @@ void XamNuiGetDeviceStatus_entry(pointer_t<X_NUI_DEVICE_STATUS> status_ptr) {
   if (!kinect->IsConnected()) {
     kinect->Initialize();
   }
+  // Ensure the engagement-changed callback is registered so player-detection
+  // events are forwarded to the game's notification listeners.
+  EnsureNuiCallbackRegistered();
   if (kinect->IsConnected()) {
     // Write connected status to both field 0 and field 3 to handle games that
     // check either offset.
@@ -506,10 +546,15 @@ dword_result_t XamUserNuiGetUserIndex_entry(dword_t enrollment_index,
       result = 0;  // engaged player maps to user 0
     }
 #endif
+    static std::atomic<bool> first_logged{false};
+    if (!first_logged.exchange(true)) {
+      XELOGI("Kinect: XamUserNuiGetUserIndex first call enrollment_index={} → user=0x{:02X}",
+             enrollment_index.value(), result);
+    }
     static std::atomic<uint32_t> last_result{KinectDevice::kNoEnrolledPlayer};
     const uint32_t prev = last_result.exchange(result);
     if (prev != result) {
-      XELOGI("Kinect: XamUserNuiGetUserIndex enrollment_index={} → user={}",
+      XELOGI("Kinect: XamUserNuiGetUserIndex enrollment_index={} → user=0x{:02X}",
              enrollment_index.value(), result);
     }
     *out_user_index = result;
@@ -526,15 +571,23 @@ dword_result_t XamUserNuiGetEnrollmentIndex_entry(dword_t user_index,
   if (out_enrollment_index) {
     uint32_t result = KinectDevice::kNoEnrolledPlayer;
 #if XE_PLATFORM_WIN32
+    KinectDevice* kinect = KinectDevice::Get();
+    // Return the engaged enrollment index for user 0 (and as a best-effort
+    // for any user when a player is engaged, since we only support one Kinect
+    // player at a time).
     if (user_index.value() == 0) {
-      KinectDevice* kinect = KinectDevice::Get();
       result = kinect->GetEngagedEnrollmentIndex();
     }
 #endif
+    static std::atomic<bool> first_logged{false};
+    if (!first_logged.exchange(true)) {
+      XELOGI("Kinect: XamUserNuiGetEnrollmentIndex first call user_index={} → enrollment=0x{:02X}",
+             user_index.value(), result);
+    }
     static std::atomic<uint32_t> last_result{KinectDevice::kNoEnrolledPlayer};
     const uint32_t prev = last_result.exchange(result);
     if (prev != result) {
-      XELOGI("Kinect: XamUserNuiGetEnrollmentIndex user_index={} → enrollment={}",
+      XELOGI("Kinect: XamUserNuiGetEnrollmentIndex user_index={} → enrollment=0x{:02X}",
              user_index.value(), result);
     }
     *out_enrollment_index = result;
@@ -716,13 +769,24 @@ DECLARE_XAM_EXPORT1(XamNuiCameraGetTiltControllerType, kNone, kStub);
 
 // Returns a session ID for the current NUI identity session.
 // Games use this to correlate face-recognition results with a session.
+// Returns a non-zero ID only while a player is actively engaged (tracked),
+// so the game can tell when someone walks into view.
 dword_result_t XamNuiIdentityGetSessionId_entry(lpdword_t session_id_out) {
-  static std::atomic<bool> logged{false};
-  if (!logged.exchange(true)) {
-    XELOGI("Kinect: XamNuiIdentityGetSessionId → 1 (first call)");
+  uint32_t session_id = 0;
+#if XE_PLATFORM_WIN32
+  KinectDevice* kinect = KinectDevice::Get();
+  if (kinect->IsConnected() &&
+      kinect->GetEngagedEnrollmentIndex() != KinectDevice::kNoEnrolledPlayer) {
+    session_id = 1;
   }
+#endif  // XE_PLATFORM_WIN32
   if (session_id_out) {
-    *session_id_out = 1;  // fixed non-zero session id
+    static std::atomic<uint32_t> last_session_id{0xFFFFFFFF};
+    const uint32_t prev = last_session_id.exchange(session_id);
+    if (prev != session_id) {
+      XELOGI("Kinect: XamNuiIdentityGetSessionId → {} (changed)", session_id);
+    }
+    *session_id_out = session_id;
   }
   return X_ERROR_SUCCESS;
 }
