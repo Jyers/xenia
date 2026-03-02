@@ -191,27 +191,46 @@ DECLARE_XAM_EXPORT1(XamNuiSkeletonGetBestSkeletonIndex, kNone, kImplemented);
 
 // Returns whether the NUI HUD system is enabled (1 = enabled, 0 = disabled).
 dword_result_t XamNuiHudIsEnabled_entry() {
+  uint32_t result = 0;
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
   if (kinect->IsConnected()) {
-    return 1;
+    result = 1;
   }
 #endif  // XE_PLATFORM_WIN32
-  return 0;
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiHudIsEnabled → {} (first call)", result);
+  }
+  return result;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudIsEnabled, kNone, kImplemented);
 
 // Processes a skeleton frame through the NUI HUD engagement system.
-// The game provides the skeleton frame (input).  The HUD uses it to
-// determine which player is "engaged" (i.e., interacting with the device).
-// NOTE: We intentionally do not update engagement state here.  The background
-// KinectDevice polling thread is the authoritative source: it receives frames
-// directly from the Kinect SDK and calls ProcessHudFrame on every new frame.
-// Forwarding the game-provided frame here caused the engagement state to be
-// reset to 0 whenever the game passed an empty/uninitialized frame buffer
-// (which happens when XamNuiNatalCameraUpdateStarting has no data yet).
+// On real hardware this function both updates the engagement state from the
+// provided frame AND writes the latest sensor data into frame_ptr so the
+// game can read skeleton data from the same buffer.  We fill frame_ptr here
+// (mirroring XamNuiNatalCameraUpdateStarting) so games that call only this
+// function (not NatalCameraUpdateStarting) still receive valid joint data.
 dword_result_t XamNuiHudInterpretFrame_entry(
     pointer_t<X_NUI_SKELETON_FRAME> frame_ptr) {
+  static std::atomic<uint64_t> call_count{0};
+  const uint64_t n = ++call_count;
+  if (n == 1 || n % 500 == 0) {
+    XELOGI("Kinect: XamNuiHudInterpretFrame call#{} frame_ptr={}",
+           n, frame_ptr ? "non-null" : "null");
+  }
+#if XE_PLATFORM_WIN32
+  if (frame_ptr) {
+    KinectDevice* kinect = KinectDevice::Get();
+    if (kinect->IsReady()) {
+      X_NUI_SKELETON_FRAME frame{};
+      if (kinect->GetSkeletonFrame(&frame)) {
+        *frame_ptr = frame;
+      }
+    }
+  }
+#endif  // XE_PLATFORM_WIN32
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudInterpretFrame, kNone, kImplemented);
@@ -219,18 +238,26 @@ DECLARE_XAM_EXPORT1(XamNuiHudInterpretFrame, kNone, kImplemented);
 // Returns the tracking ID of the currently engaged player, or 0 if no one is
 // engaged.
 dword_result_t XamNuiHudGetEngagedTrackingID_entry() {
+  uint32_t result = 0;
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
   if (kinect->IsConnected()) {
-    return kinect->GetEngagedTrackingId();
+    result = kinect->GetEngagedTrackingId();
   }
 #endif  // XE_PLATFORM_WIN32
-  return 0;
+  static std::atomic<uint32_t> last_result{0};
+  const uint32_t prev = last_result.exchange(result);
+  if (prev != result) {
+    XELOGI("Kinect: XamNuiHudGetEngagedTrackingID → {}", result);
+  }
+  return result;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudGetEngagedTrackingID, kNone, kImplemented);
 
 // Allows the game to override the engaged tracking ID.
 void XamNuiHudSetEngagedTrackingID_entry(dword_t tracking_id) {
+  XELOGI("Kinect: XamNuiHudSetEngagedTrackingID tracking_id={}",
+         tracking_id.value());
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
   if (kinect->IsConnected()) {
@@ -243,13 +270,19 @@ DECLARE_XAM_EXPORT1(XamNuiHudSetEngagedTrackingID, kNone, kImplemented);
 // Returns the enrollment (player slot) index for the engaged player, or 0xFF
 // if no one is engaged.
 dword_result_t XamNuiHudGetEngagedEnrollmentIndex_entry() {
+  uint32_t result = KinectDevice::kNoEnrolledPlayer;
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
   if (kinect->IsConnected()) {
-    return kinect->GetEngagedEnrollmentIndex();
+    result = kinect->GetEngagedEnrollmentIndex();
   }
 #endif  // XE_PLATFORM_WIN32
-  return KinectDevice::kNoEnrolledPlayer;
+  static std::atomic<uint32_t> last_result{KinectDevice::kNoEnrolledPlayer};
+  const uint32_t prev = last_result.exchange(result);
+  if (prev != result) {
+    XELOGI("Kinect: XamNuiHudGetEngagedEnrollmentIndex → {}", result);
+  }
+  return result;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudGetEngagedEnrollmentIndex, kNone, kImplemented);
 
@@ -309,7 +342,11 @@ DECLARE_XAM_EXPORT1(XamNuiNatalCameraUpdateStarting, kNone, kImplemented);
 
 // Called by the game at the end of a camera processing cycle.
 void XamNuiNatalCameraUpdateComplete_entry() {
-  // Nothing to do on the host side.
+  static std::atomic<uint64_t> call_count{0};
+  const uint64_t n = ++call_count;
+  if (n == 1 || n % 500 == 0) {
+    XELOGI("Kinect: XamNuiNatalCameraUpdateComplete call#{}", n);
+  }
 }
 DECLARE_XAM_EXPORT1(XamNuiNatalCameraUpdateComplete, kNone, kImplemented);
 
