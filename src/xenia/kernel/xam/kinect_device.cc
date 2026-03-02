@@ -11,8 +11,6 @@
 
 #if XE_PLATFORM_WIN32
 
-#include <oleauto.h>  // SysFreeString
-
 #include "xenia/base/logging.h"
 
 namespace xe {
@@ -46,26 +44,54 @@ bool KinectDevice::LoadKinectDll() {
     return false;
   }
 
-  fn_nui_get_sensor_count_ = reinterpret_cast<PFN_NuiGetSensorCount>(
-      GetProcAddress(kinect_dll_, "NuiGetSensorCount"));
-  fn_nui_create_sensor_by_index_ =
-      reinterpret_cast<PFN_NuiCreateSensorByIndex>(
-          GetProcAddress(kinect_dll_, "NuiCreateSensorByIndex"));
-
-  if (!fn_nui_get_sensor_count_ || !fn_nui_create_sensor_by_index_) {
-    FreeLibrary(kinect_dll_);
-    kinect_dll_ = nullptr;
-    fn_nui_get_sensor_count_ = nullptr;
-    fn_nui_create_sensor_by_index_ = nullptr;
-    return false;
+  // Load all required free-function exports directly.  This avoids the fragile
+  // COM-vtable approach: a single extra or reordered method in any SDK version
+  // shifts every subsequent slot and causes the wrong function to be called.
+#define LOAD_NUI(name, field)                                              \
+  field = reinterpret_cast<decltype(field)>(GetProcAddress(kinect_dll_, name)); \
+  if (!field) {                                                            \
+    XELOGE("Kinect: {} not found in Kinect10.dll — SDK too old?", name);  \
+    goto load_fail;                                                        \
   }
 
-  char dll_path[MAX_PATH] = {};
-  if (GetModuleFileNameA(kinect_dll_, dll_path, MAX_PATH)) {
-    XELOGI("Kinect: Loaded Kinect10.dll from: {}", dll_path);
-  }
+  LOAD_NUI("NuiGetSensorCount", fn_nui_get_sensor_count_)
+  LOAD_NUI("NuiInitialize", fn_nui_initialize_)
+  LOAD_NUI("NuiShutdown", fn_nui_shutdown_)
+  LOAD_NUI("NuiSkeletonTrackingEnable", fn_nui_skeleton_tracking_enable_)
+  LOAD_NUI("NuiSkeletonTrackingDisable", fn_nui_skeleton_tracking_disable_)
+  LOAD_NUI("NuiSkeletonGetNextFrame", fn_nui_skeleton_get_next_frame_)
 
+#undef LOAD_NUI
+
+  // Optional functions: camera elevation.  Not present in very old SDK
+  // releases; silently ignore if missing.
+  fn_nui_camera_elevation_get_angle_ =
+      reinterpret_cast<PFN_NuiCameraElevationGetAngle>(
+          GetProcAddress(kinect_dll_, "NuiCameraElevationGetAngle"));
+  fn_nui_camera_elevation_set_angle_ =
+      reinterpret_cast<PFN_NuiCameraElevationSetAngle>(
+          GetProcAddress(kinect_dll_, "NuiCameraElevationSetAngle"));
+
+  {
+    char dll_path[MAX_PATH] = {};
+    if (GetModuleFileNameA(kinect_dll_, dll_path, MAX_PATH)) {
+      XELOGI("Kinect: Loaded Kinect10.dll from: {}", dll_path);
+    }
+  }
   return true;
+
+load_fail:
+  FreeLibrary(kinect_dll_);
+  kinect_dll_ = nullptr;
+  fn_nui_get_sensor_count_ = nullptr;
+  fn_nui_initialize_ = nullptr;
+  fn_nui_shutdown_ = nullptr;
+  fn_nui_skeleton_tracking_enable_ = nullptr;
+  fn_nui_skeleton_tracking_disable_ = nullptr;
+  fn_nui_skeleton_get_next_frame_ = nullptr;
+  fn_nui_camera_elevation_get_angle_ = nullptr;
+  fn_nui_camera_elevation_set_angle_ = nullptr;
+  return false;
 }
 
 bool KinectDevice::Initialize() {
@@ -89,51 +115,39 @@ bool KinectDevice::Initialize() {
     return false;
   }
   XELOGI("Kinect: {} sensor(s) found.", sensor_count);
-
-  // Open the first sensor.
-  hr = fn_nui_create_sensor_by_index_(0, &nui_sensor_);
-  if (FAILED(hr) || !nui_sensor_) {
-    XELOGE("Kinect: NuiCreateSensorByIndex failed (hr=0x{:08X}).",
-           static_cast<uint32_t>(hr));
-    return false;
-  }
   connected_ = true;
 
-  // Initialise for skeleton tracking only.
-  // NUI_INITIALIZE_FLAG_USES_SKELETON (0x08) is the correct flag for
-  // skeleton-only initialisation, matching the official Kinect SDK
-  // SkeletonBasics sample.
+  // Initialise the default sensor (sensor 0) for skeleton tracking.
+  // NUI_INITIALIZE_FLAG_USES_DEPTH_AND_PLAYER_INDEX (0x01) is included
+  // alongside NUI_INITIALIZE_FLAG_USES_SKELETON (0x08): some SDK/driver
+  // combinations reject NuiSkeletonTrackingEnable with E_INVALIDARG unless
+  // the depth-and-player-index pipeline was also explicitly requested here.
+  // The SDK manages the depth stream internally; we never open one ourselves.
   XELOGI("Kinect: Calling NuiInitialize with flags=0x{:08X}.",
-         static_cast<uint32_t>(kNuiInitFlagUseSkeleton));
-  hr = Vtbl()->NuiInitialize(nui_sensor_, kNuiInitFlagUseSkeleton);
+         static_cast<uint32_t>(kNuiInitFlags));
+  hr = fn_nui_initialize_(kNuiInitFlags);
   if (FAILED(hr)) {
     XELOGE("Kinect: NuiInitialize failed (hr=0x{:08X}).",
            static_cast<uint32_t>(hr));
-    // Still considered connected but not ready.
     return false;
   }
+  nui_initialized_ = true;
   XELOGI("Kinect: NuiInitialize succeeded (hr=0x{:08X}).",
          static_cast<uint32_t>(hr));
 
-  // Enable skeleton tracking.
-  // The official Kinect SDK SkeletonBasics sample always creates a real
-  // Win32 event handle and passes it to NuiSkeletonTrackingEnable so the SDK
-  // can signal it when a new frame is ready.  Passing nullptr is documented
-  // as optional but fails with E_INVALIDARG on some SDK/driver combinations,
-  // which then causes every subsequent NuiSkeletonGetNextFrame call to also
-  // return E_INVALIDARG (because tracking is never actually enabled).
+  // Create the frame-ready event and enable skeleton tracking.
   skeleton_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   if (!skeleton_event_) {
-    XELOGW("Kinect: CreateEvent failed (err=0x{:08X}); falling back to "
-           "nullptr event handle.",
+    XELOGW("Kinect: CreateEvent failed (err=0x{:08X}).",
            static_cast<uint32_t>(GetLastError()));
   }
-  hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, skeleton_event_,
-                                         kNuiSkeletonTrackingFlagDefault);
+  hr = fn_nui_skeleton_tracking_enable_(skeleton_event_,
+                                        kNuiSkeletonTrackingFlagDefault);
   if (FAILED(hr)) {
-    XELOGW("Kinect: NuiSkeletonTrackingEnable returned hr=0x{:08X} — "
-           "continuing anyway; frames may still arrive via polling.",
+    XELOGE("Kinect: NuiSkeletonTrackingEnable failed (hr=0x{:08X}) — "
+           "skeleton tracking unavailable.",
            static_cast<uint32_t>(hr));
+    return false;
   }
 
   ready_ = true;
@@ -152,7 +166,13 @@ void KinectDevice::Shutdown() {
       FreeLibrary(kinect_dll_);
       kinect_dll_ = nullptr;
       fn_nui_get_sensor_count_ = nullptr;
-      fn_nui_create_sensor_by_index_ = nullptr;
+      fn_nui_initialize_ = nullptr;
+      fn_nui_shutdown_ = nullptr;
+      fn_nui_skeleton_tracking_enable_ = nullptr;
+      fn_nui_skeleton_tracking_disable_ = nullptr;
+      fn_nui_skeleton_get_next_frame_ = nullptr;
+      fn_nui_camera_elevation_get_angle_ = nullptr;
+      fn_nui_camera_elevation_set_angle_ = nullptr;
     }
     return;
   }
@@ -163,14 +183,14 @@ void KinectDevice::Shutdown() {
     poll_thread_.join();
   }
 
-  if (nui_sensor_) {
-    if (ready_) {
-      Vtbl()->NuiSkeletonTrackingDisable(nui_sensor_);
-      Vtbl()->NuiShutdown(nui_sensor_);
+  if (nui_initialized_) {
+    if (ready_ && fn_nui_skeleton_tracking_disable_) {
+      fn_nui_skeleton_tracking_disable_();
     }
-    // Release the COM reference.
-    reinterpret_cast<IUnknown*>(nui_sensor_)->Release();
-    nui_sensor_ = nullptr;
+    if (fn_nui_shutdown_) {
+      fn_nui_shutdown_();
+    }
+    nui_initialized_ = false;
   }
 
   if (skeleton_event_) {
@@ -185,7 +205,13 @@ void KinectDevice::Shutdown() {
     FreeLibrary(kinect_dll_);
     kinect_dll_ = nullptr;
     fn_nui_get_sensor_count_ = nullptr;
-    fn_nui_create_sensor_by_index_ = nullptr;
+    fn_nui_initialize_ = nullptr;
+    fn_nui_shutdown_ = nullptr;
+    fn_nui_skeleton_tracking_enable_ = nullptr;
+    fn_nui_skeleton_tracking_disable_ = nullptr;
+    fn_nui_skeleton_get_next_frame_ = nullptr;
+    fn_nui_camera_elevation_get_angle_ = nullptr;
+    fn_nui_camera_elevation_set_angle_ = nullptr;
   }
 }
 
@@ -217,8 +243,7 @@ void KinectDevice::PollThread() {
     // Use 0 ms timeout when an event handle is available (frame is already
     // ready); otherwise block for up to 100 ms.
     DWORD timeout_ms = skeleton_event_ ? 0 : 100;
-    HRESULT hr = Vtbl()->NuiSkeletonGetNextFrame(nui_sensor_, timeout_ms,
-                                                 &native_frame);
+    HRESULT hr = fn_nui_skeleton_get_next_frame_(timeout_ms, &native_frame);
     ++poll_count;
     if (SUCCEEDED(hr)) {
       ++frame_count;
@@ -389,34 +414,26 @@ uint32_t KinectDevice::GetEngagedEnrollmentIndex() const {
 }
 
 long KinectDevice::GetCameraElevationAngle() const {
-  if (!ready_) {
+  if (!ready_ || !fn_nui_camera_elevation_get_angle_) {
     return 0;
   }
   LONG angle = 0;
-  Vtbl()->NuiCameraElevationGetAngle(nui_sensor_, &angle);
+  fn_nui_camera_elevation_get_angle_(&angle);
   return static_cast<long>(angle);
 }
 
 bool KinectDevice::SetCameraElevationAngle(long degrees) {
-  if (!ready_) {
+  if (!ready_ || !fn_nui_camera_elevation_set_angle_) {
     return false;
   }
-  HRESULT hr = Vtbl()->NuiCameraElevationSetAngle(
-      nui_sensor_, static_cast<LONG>(degrees));
+  HRESULT hr = fn_nui_camera_elevation_set_angle_(static_cast<LONG>(degrees));
   return SUCCEEDED(hr);
 }
 
 std::wstring KinectDevice::GetDeviceConnectionId() const {
-  if (!connected_ || !nui_sensor_) {
-    return {};
-  }
-  BSTR bstr = Vtbl()->NuiDeviceConnectionId(nui_sensor_);
-  if (!bstr) {
-    return {};
-  }
-  std::wstring result(bstr);
-  SysFreeString(bstr);
-  return result;
+  // Device connection ID is only available through the COM interface, which
+  // we no longer hold (free-function API is used instead).  Return empty.
+  return {};
 }
 
 // ---------------------------------------------------------------------------

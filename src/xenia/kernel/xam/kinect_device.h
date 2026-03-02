@@ -133,56 +133,27 @@ class KinectDevice {
   KinectDevice();
   ~KinectDevice();
 
-  // Loads Kinect10.dll and resolves the two free-function entry points.
+  // Loads Kinect10.dll and resolves all required free-function entry points.
   bool LoadKinectDll();
 
   // Background thread that polls for new skeleton frames.
   void PollThread();
 
   // ---- Kinect10.dll free-function types ----------------------------------
+  // These are the legacy global-function exports from Kinect10.dll.  Using
+  // GetProcAddress for each one is far more robust than trying to replicate
+  // the COM vtable layout, which differs subtly between SDK versions and
+  // causes every subsequent slot to shift silently when one entry is wrong.
   typedef HRESULT(WINAPI* PFN_NuiGetSensorCount)(int* pCount);
-  typedef HRESULT(WINAPI* PFN_NuiCreateSensorByIndex)(int index,
-                                                       void** ppNuiSensor);
-
-  // ---- Minimal INuiSensor vtable (Kinect SDK v1.8) -----------------------
-  // Only the methods we actually call are given explicit types; the rest are
-  // represented as opaque void* placeholders so the vtable offsets remain
-  // correct even when those entries are never used.
-  struct NuiSensorVtbl {
-    // IUnknown (indices 0-2)
-    void* QueryInterface;
-    void* AddRef;
-    void* Release;
-    // INuiSensor (indices 3+)
-    HRESULT(STDMETHODCALLTYPE* NuiInitialize)(void* self, DWORD dwFlags);
-    void(STDMETHODCALLTYPE* NuiShutdown)(void* self);
-    void* NuiSetFrameEndEvent;
-    void* NuiImageStreamOpen;
-    void* NuiImageStreamSetImageFrameFlags;
-    void* NuiImageStreamGetNextFrame;
-    void* NuiImageStreamReleaseFrame;
-    HRESULT(STDMETHODCALLTYPE* NuiSkeletonTrackingEnable)(
-        void* self, HANDLE hNextFrameEvent, DWORD dwFlags);
-    HRESULT(STDMETHODCALLTYPE* NuiSkeletonTrackingDisable)(void* self);
-    void* NuiSkeletonSetTrackedSkeletons;
-    HRESULT(STDMETHODCALLTYPE* NuiSkeletonGetNextFrame)(
-        void* self, DWORD dwMillisecondsToWait, void* pSkeletonFrame);
-    void* NuiTransformSmooth;
-    void* NuiAccelerometerGetCurrentReading;
-    HRESULT(STDMETHODCALLTYPE* NuiCameraElevationSetAngle)(void* self,
-                                                            LONG lAngleDegrees);
-    HRESULT(STDMETHODCALLTYPE* NuiCameraElevationGetAngle)(
-        void* self, LONG* plAngleDegrees);
-    // The two entries below were added in Kinect SDK 1.5 and appear in the
-    // vtable between NuiCameraElevationGetAngle and NuiSetDepthFilter.
-    void* NuiImageGetColorPixelCoordinatesFromDepthPixel;
-    void* NuiImageGetColorPixelCoordinatesFromDepthPixelAtResolution;
-    void* NuiSetDepthFilter;
-    void* NuiGetDepthFilter;
-    void* NuiGetCoordinateMapper;
-    void* NuiDepthPixelToDepth;
-    BSTR(STDMETHODCALLTYPE* NuiDeviceConnectionId)(void* self);
-  };
+  typedef HRESULT(WINAPI* PFN_NuiInitialize)(DWORD dwFlags);
+  typedef void(WINAPI* PFN_NuiShutdown)();
+  typedef HRESULT(WINAPI* PFN_NuiSkeletonTrackingEnable)(
+      HANDLE hNextFrameEvent, DWORD dwFlags);
+  typedef HRESULT(WINAPI* PFN_NuiSkeletonTrackingDisable)();
+  typedef HRESULT(WINAPI* PFN_NuiSkeletonGetNextFrame)(
+      DWORD dwMillisecondsToWait, void* pSkeletonFrame);
+  typedef HRESULT(WINAPI* PFN_NuiCameraElevationGetAngle)(LONG* plAngleDegrees);
+  typedef HRESULT(WINAPI* PFN_NuiCameraElevationSetAngle)(LONG lAngleDegrees);
 
   // Native (little-endian) Kinect SDK structures.
   struct NuiVector4 {
@@ -221,25 +192,31 @@ class KinectDevice {
     NuiSkeletonData SkeletonData[6];
   };
 
-  // Kinect NUI initialisation flags for skeleton tracking.
-  // NUI_INITIALIZE_FLAG_USES_SKELETON = 0x00000008
+  // Kinect NUI initialisation flags.
+  // NUI_INITIALIZE_FLAG_USES_DEPTH_AND_PLAYER_INDEX = 0x00000001
+  // NUI_INITIALIZE_FLAG_USES_SKELETON               = 0x00000008
   //
-  // Use the skeleton flag alone, matching the official Kinect SDK
-  // SkeletonBasics sample.  Combining it with
-  // NUI_INITIALIZE_FLAG_USES_DEPTH_AND_PLAYER_INDEX (0x01) when no depth
-  // stream is subsequently opened can leave the SDK in an inconsistent state
-  // where NuiSkeletonTrackingEnable returns E_INVALIDARG (0x80070057).
-  static constexpr DWORD kNuiInitFlagUseSkeleton = 0x00000008;
+  // Both flags are required: some SDK/driver combinations will accept the
+  // skeleton flag alone in NuiInitialize but then reject NuiSkeletonTrackingEnable
+  // with E_INVALIDARG unless the depth-and-player-index pipeline was also
+  // explicitly requested.  The SDK handles depth internally; we never open a
+  // depth stream ourselves so there is no overhead from including this flag.
+  static constexpr DWORD kNuiInitFlags = 0x00000001 | 0x00000008;
 
-  // Skeleton tracking flags.
+  // Skeleton tracking flags (none required).
   static constexpr DWORD kNuiSkeletonTrackingFlagDefault = 0;
 
   // ---- State ------------------------------------------------------------
   HMODULE kinect_dll_ = nullptr;
   PFN_NuiGetSensorCount fn_nui_get_sensor_count_ = nullptr;
-  PFN_NuiCreateSensorByIndex fn_nui_create_sensor_by_index_ = nullptr;
+  PFN_NuiInitialize fn_nui_initialize_ = nullptr;
+  PFN_NuiShutdown fn_nui_shutdown_ = nullptr;
+  PFN_NuiSkeletonTrackingEnable fn_nui_skeleton_tracking_enable_ = nullptr;
+  PFN_NuiSkeletonTrackingDisable fn_nui_skeleton_tracking_disable_ = nullptr;
+  PFN_NuiSkeletonGetNextFrame fn_nui_skeleton_get_next_frame_ = nullptr;
+  PFN_NuiCameraElevationGetAngle fn_nui_camera_elevation_get_angle_ = nullptr;
+  PFN_NuiCameraElevationSetAngle fn_nui_camera_elevation_set_angle_ = nullptr;
 
-  void* nui_sensor_ = nullptr;  // raw INuiSensor* (COM ref held)
   HANDLE skeleton_event_ = nullptr;  // signalled by the SDK when a new frame is ready
 
   std::thread poll_thread_;
@@ -254,13 +231,10 @@ class KinectDevice {
   uint32_t engaged_enrollment_index_ = kNoEnrolledPlayer;
 
   bool connected_ = false;
+  bool nui_initialized_ = false;  // true once NuiInitialize has succeeded
   bool ready_ = false;
 
   // ---- Helpers ----------------------------------------------------------
-  inline NuiSensorVtbl* Vtbl() const {
-    return *reinterpret_cast<NuiSensorVtbl**>(nui_sensor_);
-  }
-
   // Convert a native NuiSkeletonFrame to the Xbox 360 big-endian layout.
   static void ConvertFrame(const NuiSkeletonFrame& src,
                            X_NUI_SKELETON_FRAME* dst);
