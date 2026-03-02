@@ -32,16 +32,19 @@ namespace xam {
 extern std::atomic<int> xam_dialogs_shown_;
 
 struct X_NUI_DEVICE_STATUS {
-  xe::be<uint32_t> unk0;
+  // The connection status is written to both field 0 and field 3 because the
+  // exact layout varies by SDK version.  Games that check either offset will
+  // see the correct connected/not-connected value.
+  xe::be<uint32_t> status0;  // field 0 — written for safety
   xe::be<uint32_t> unk1;
   xe::be<uint32_t> unk2;
-  xe::be<uint32_t> status;
+  xe::be<uint32_t> status3;  // field 3 — original observed-on-hardware field
   xe::be<uint32_t> unk4;
   xe::be<uint32_t> unk5;
 };
 static_assert(sizeof(X_NUI_DEVICE_STATUS) == 24, "Size matters");
 
-// status field values observed on real hardware.
+// Status values used in both field 0 and field 3.
 constexpr uint32_t kNuiDeviceStatusNotConnected = 0;
 constexpr uint32_t kNuiDeviceStatusConnected = 1;
 
@@ -54,7 +57,10 @@ void XamNuiGetDeviceStatus_entry(pointer_t<X_NUI_DEVICE_STATUS> status_ptr) {
     kinect->Initialize();
   }
   if (kinect->IsConnected()) {
-    status_ptr->status = kNuiDeviceStatusConnected;
+    // Write connected status to both field 0 and field 3 to handle games that
+    // check either offset.
+    status_ptr->status0 = kNuiDeviceStatusConnected;
+    status_ptr->status3 = kNuiDeviceStatusConnected;
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true)) {
       XELOGI("Kinect: XamNuiGetDeviceStatus → Connected.");
@@ -68,7 +74,8 @@ void XamNuiGetDeviceStatus_entry(pointer_t<X_NUI_DEVICE_STATUS> status_ptr) {
     }
   }
 #endif  // XE_PLATFORM_WIN32
-  status_ptr->status = kNuiDeviceStatusNotConnected;
+  status_ptr->status0 = kNuiDeviceStatusNotConnected;
+  status_ptr->status3 = kNuiDeviceStatusNotConnected;
 }
 DECLARE_XAM_EXPORT1(XamNuiGetDeviceStatus, kNone, kImplemented);
 
@@ -100,6 +107,11 @@ DECLARE_XAM_EXPORT1(XamNuiIsDeviceReady, kNone, kImplemented);
 
 dword_result_t XamNuiCameraElevationSetAngle_entry(int_t angle) {
   // angle is in degrees, range [-27, 27].
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraElevationSetAngle angle={} (first call)",
+           angle.value());
+  }
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
   if (kinect->IsReady()) {
@@ -115,6 +127,10 @@ dword_result_t XamNuiCameraElevationGetAngle_entry(
     pointer_t<xe::be<int32_t>> angle_ptr) {
   if (!angle_ptr) {
     return X_ERROR_BAD_ARGUMENTS;
+  }
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraElevationGetAngle (first call)");
   }
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
@@ -133,6 +149,10 @@ dword_result_t XamNuiGetDeviceSerialNumber_entry(lpvoid_t buffer_ptr,
   // The serial-number buffer on the 360 is 40 bytes (20 wide chars).
   if (!buffer_ptr || !buffer_size) {
     return X_ERROR_BAD_ARGUMENTS;
+  }
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiGetDeviceSerialNumber (first call)");
   }
   std::memset(buffer_ptr, 0, buffer_size);
 #if XE_PLATFORM_WIN32
@@ -292,36 +312,36 @@ DECLARE_XAM_EXPORT1(XamNuiHudGetEngagedEnrollmentIndex, kNone, kImplemented);
 // X_ERROR_DEVICE_NOT_CONNECTED when no data is available.
 dword_result_t XamNuiNatalCameraUpdateStarting_entry(
     pointer_t<X_NUI_SKELETON_FRAME> frame_ptr) {
+  // Always count calls regardless of ready state or null frame_ptr so we
+  // never silently miss calls in diagnostics.
+  static std::atomic<uint64_t> call_count{0};
+  const uint64_t n = ++call_count;
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
   if (kinect->IsReady()) {
     if (frame_ptr) {
       X_NUI_SKELETON_FRAME frame{};
       const bool has_frame = kinect->GetSkeletonFrame(&frame);
-      {
-        static std::atomic<uint64_t> call_count{0};
-        const uint64_t n = ++call_count;
-        // Log first call and every 500 calls after that.
-        if (n == 1 || n % 500 == 0) {
-          if (has_frame) {
-            // Show tracking states for all 6 skeleton slots.
-            XELOGI(
-                "Kinect: XamNuiNatalCameraUpdateStarting call#{} — "
-                "frame available (frame#={} slot_states=[{},{},{},{},{},{}])",
-                n,
-                static_cast<uint32_t>(frame.frame_number),
-                static_cast<uint32_t>(frame.skeleton_data[0].tracking_state),
-                static_cast<uint32_t>(frame.skeleton_data[1].tracking_state),
-                static_cast<uint32_t>(frame.skeleton_data[2].tracking_state),
-                static_cast<uint32_t>(frame.skeleton_data[3].tracking_state),
-                static_cast<uint32_t>(frame.skeleton_data[4].tracking_state),
-                static_cast<uint32_t>(frame.skeleton_data[5].tracking_state));
-          } else {
-            XELOGW(
-                "Kinect: XamNuiNatalCameraUpdateStarting call#{} — "
-                "no frame yet",
-                n);
-          }
+      // Log first call and every 500 calls after that.
+      if (n == 1 || n % 500 == 0) {
+        if (has_frame) {
+          // Show tracking states for all 6 skeleton slots.
+          XELOGI(
+              "Kinect: XamNuiNatalCameraUpdateStarting call#{} — "
+              "frame available (frame#={} slot_states=[{},{},{},{},{},{}])",
+              n,
+              static_cast<uint32_t>(frame.frame_number),
+              static_cast<uint32_t>(frame.skeleton_data[0].tracking_state),
+              static_cast<uint32_t>(frame.skeleton_data[1].tracking_state),
+              static_cast<uint32_t>(frame.skeleton_data[2].tracking_state),
+              static_cast<uint32_t>(frame.skeleton_data[3].tracking_state),
+              static_cast<uint32_t>(frame.skeleton_data[4].tracking_state),
+              static_cast<uint32_t>(frame.skeleton_data[5].tracking_state));
+        } else {
+          XELOGW(
+              "Kinect: XamNuiNatalCameraUpdateStarting call#{} — "
+              "no frame yet",
+              n);
         }
       }
       if (has_frame) {
@@ -333,7 +353,15 @@ dword_result_t XamNuiNatalCameraUpdateStarting_entry(
       frame_ptr.Zero();
       return X_ERROR_SUCCESS;
     }
+    // frame_ptr is null — log first occurrence so we know the call pattern.
+    if (n == 1) {
+      XELOGI("Kinect: XamNuiNatalCameraUpdateStarting call#1 — null frame_ptr");
+    }
     return X_ERROR_SUCCESS;
+  }
+  // Not ready yet — log first occurrence.
+  if (n == 1) {
+    XELOGW("Kinect: XamNuiNatalCameraUpdateStarting call#1 — not ready");
   }
 #endif  // XE_PLATFORM_WIN32
   return X_ERROR_DEVICE_NOT_CONNECTED;
@@ -365,7 +393,11 @@ DECLARE_XAM_EXPORT1(XamNuiSetForceDeviceOff, kNone, kImplemented);
 // Notifies the system of a player engagement state change.  Used by the game
 // to signal that a specific player index has engaged/disengaged.
 void XamNuiPlayerEngagementUpdate_entry(dword_t user_index, dword_t engaged) {
-  // No state we need to maintain on the host side.
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiPlayerEngagementUpdate user_index={} engaged={} (first call)",
+           user_index.value(), engaged.value());
+  }
 }
 DECLARE_XAM_EXPORT1(XamNuiPlayerEngagementUpdate, kNone, kImplemented);
 
@@ -380,18 +412,31 @@ dword_result_t XamNuiHudGetVersions_entry(lpdword_t major_out,
   if (minor_out) {
     *minor_out = 0;
   }
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiHudGetVersions → major=2 minor=0 (first call)");
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudGetVersions, kNone, kImplemented);
 
 // Enables or disables an input filter in the NUI HUD.
 dword_result_t XamNuiHudEnableInputFilter_entry(dword_t enable) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiHudEnableInputFilter enable={} (first call)",
+           enable.value());
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamNuiHudEnableInputFilter, kNone, kImplemented);
 
 // Returns the HUD initialisation flags.
 dword_result_t XamNuiHudGetInitializeFlags_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiHudGetInitializeFlags → 0 (first call)");
+  }
   // Return 0 (default flags - no special modes).
   return 0;
 }
@@ -409,12 +454,20 @@ DECLARE_XAM_EXPORT1(XamNuiHudGetInitializeFlags, kNone, kImplemented);
 // Returns the controller slot (user index) that should be bound to the Kinect.
 // The game calls this before XamUserNuiBind to find a free/suitable slot.
 dword_result_t XamUserNuiGetUserIndexForBind_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamUserNuiGetUserIndexForBind → 0 (first call)");
+  }
   return 0;  // Default to user 0 (single-player Kinect assumption).
 }
 DECLARE_XAM_EXPORT1(XamUserNuiGetUserIndexForBind, kNone, kStub);
 
 // Returns the controller slot that is recommended for sign-in via Kinect.
 dword_result_t XamUserNuiGetUserIndexForSignin_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamUserNuiGetUserIndexForSignin → 0 (first call)");
+  }
   return 0;
 }
 DECLARE_XAM_EXPORT1(XamUserNuiGetUserIndexForSignin, kNone, kStub);
@@ -428,6 +481,11 @@ DECLARE_XAM_EXPORT1(XamUserNuiBind, kNone, kStub);
 
 // Unbinds a user from the Kinect engagement system.
 dword_result_t XamUserNuiUnbind_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamUserNuiUnbind user_index={} (first call)",
+           user_index.value());
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamUserNuiUnbind, kNone, kStub);
@@ -490,30 +548,53 @@ DECLARE_XAM_EXPORT1(XamUserNuiGetEnrollmentIndex, kNone, kStub);
 // We don't maintain a score table — engagement is determined by the first
 // tracked skeleton found by the background polling thread.
 dword_result_t XamNuiSkeletonScoreUpdate_entry(unknown_t unk1, unknown_t unk2) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiSkeletonScoreUpdate (first call)");
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamNuiSkeletonScoreUpdate, kNone, kStub);
 
 // Sets camera flags (e.g. near mode, seated tracking).
 dword_result_t XamNuiCameraSetFlags_entry(dword_t flags) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraSetFlags flags=0x{:08X} (first call)",
+           flags.value());
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamNuiCameraSetFlags, kNone, kStub);
 
 // Stores the current floor plane for use in subsequent tracking.
 dword_result_t XamNuiCameraRememberFloor_entry() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamNuiCameraRememberFloor (first call)");
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamNuiCameraRememberFloor, kNone, kStub);
 
 // Enables or disables NUI automation (testing/scripted input).
 dword_result_t XamEnableNuiAutomation_entry(dword_t enable) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamEnableNuiAutomation enable={} (first call)",
+           enable.value());
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamEnableNuiAutomation, kNone, kStub);
 
 // Enables or disables Natal playback mode.
 dword_result_t XamEnableNatalPlayback_entry(dword_t enable) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamEnableNatalPlayback enable={} (first call)",
+           enable.value());
+  }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamEnableNatalPlayback, kNone, kStub);
