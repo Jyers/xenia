@@ -57,8 +57,8 @@ constexpr uint32_t kNuiDeviceStatusConnected = 1;
 //
 // XN_SYS_NUI_ENGAGED  (0x0A000003, local_id=3): physical player engagement
 //   change — a person has stepped into (or left) the Kinect field of view.
-//   data = enrollment_index of the engaged player (0 for first player),
-//          or kNoEnrolledPlayer (0xFF) when nobody is engaged.
+//   data = tracking_id of the engaged player (non-zero), or 0 when cleared.
+//   Games check param != 0 to detect engagement and 0 to detect departure.
 // XN_SYS_NUI_ENROLLED (0x0A000002, local_id=2): biometric / face-recognition
 //   enrollment change.
 //   data = enrollment_index (0 for first player, 0xFF when cleared).
@@ -93,11 +93,12 @@ static void EnsureNuiCallbackRegistered() {
               "XN_SYS_NUI_ENROLLED (0x{:08X}) — engagement cleared.",
               kXNotifySysNuiEngaged, kXNotifySysNuiEnrolled);
         }
-        // Both notifications carry the enrollment_index as their data
-        // parameter, matching Xbox 360 XDK semantics:
-        //   ENGAGED: enrollment_index (0=first player) or 0xFF when cleared.
-        //   ENROLLED: same semantics.
-        ks->BroadcastNotification(kXNotifySysNuiEngaged,  enrollment_index);
+        // ENGAGED carries tracking_id (non-zero = someone engaged, 0 = nobody).
+        // ENROLLED carries enrollment_index (0 = first player, 0xFF = nobody).
+        // This matches Xbox 360 hardware behaviour: the game checks
+        // ENGAGED param != 0 to know someone stepped in, and uses the
+        // enrollment_index from ENROLLED to index into the skeleton frame.
+        ks->BroadcastNotification(kXNotifySysNuiEngaged,  tracking_id);
         ks->BroadcastNotification(kXNotifySysNuiEnrolled, enrollment_index);
       });
 }
