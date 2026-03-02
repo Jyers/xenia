@@ -240,6 +240,7 @@ class KinectDevice {
   PFN_NuiCreateSensorByIndex fn_nui_create_sensor_by_index_ = nullptr;
 
   void* nui_sensor_ = nullptr;  // raw INuiSensor* (COM ref held)
+  HANDLE skeleton_event_ = nullptr;  // signalled by the SDK when a new frame is ready
 
   std::thread poll_thread_;
   std::atomic<bool> running_{false};

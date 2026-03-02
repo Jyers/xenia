@@ -116,13 +116,19 @@ bool KinectDevice::Initialize() {
          static_cast<uint32_t>(hr));
 
   // Enable skeleton tracking.
-  // Following the KinectToVR/plugin_Kinect360 reference implementation:
-  // pass nullptr for the event handle and DO NOT abort if this call fails.
-  // NuiInitialize(NUI_INITIALIZE_FLAG_USES_SKELETON) already starts the
-  // skeleton pipeline; NuiSkeletonTrackingEnable may return E_INVALIDARG on
-  // some SDK/driver combinations yet NuiSkeletonGetNextFrame still delivers
-  // frames normally.
-  hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, nullptr,
+  // The official Kinect SDK SkeletonBasics sample always creates a real
+  // Win32 event handle and passes it to NuiSkeletonTrackingEnable so the SDK
+  // can signal it when a new frame is ready.  Passing nullptr is documented
+  // as optional but fails with E_INVALIDARG on some SDK/driver combinations,
+  // which then causes every subsequent NuiSkeletonGetNextFrame call to also
+  // return E_INVALIDARG (because tracking is never actually enabled).
+  skeleton_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (!skeleton_event_) {
+    XELOGW("Kinect: CreateEvent failed (err=0x{:08X}); falling back to "
+           "nullptr event handle.",
+           static_cast<uint32_t>(GetLastError()));
+  }
+  hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, skeleton_event_,
                                          kNuiSkeletonTrackingFlagDefault);
   if (FAILED(hr)) {
     XELOGW("Kinect: NuiSkeletonTrackingEnable returned hr=0x{:08X} — "
@@ -167,6 +173,11 @@ void KinectDevice::Shutdown() {
     nui_sensor_ = nullptr;
   }
 
+  if (skeleton_event_) {
+    CloseHandle(skeleton_event_);
+    skeleton_event_ = nullptr;
+  }
+
   ready_ = false;
   connected_ = false;
 
@@ -188,16 +199,34 @@ void KinectDevice::PollThread() {
   HRESULT last_hr = S_OK;
 
   while (running_) {
-    // Poll for the next skeleton frame, blocking for up to 100 ms.
-    // NuiSkeletonTrackingEnable was called with nullptr; regardless of
-    // whether it succeeded, the skeleton pipeline started by NuiInitialize
-    // delivers frames here.
+    // Wait for the SDK to signal that a new skeleton frame is ready.
+    // This mirrors the official SkeletonBasics sample pattern:
+    //   WaitForSingleObject(event, timeout) → NuiSkeletonGetNextFrame(0) →
+    //   ResetEvent(event).
+    // If no event was created (CreateEvent failed), fall back to a blocking
+    // NuiSkeletonGetNextFrame with a 100 ms timeout.
+    if (skeleton_event_) {
+      DWORD wait_result = WaitForSingleObject(skeleton_event_, 100);
+      if (wait_result != WAIT_OBJECT_0) {
+        // Timeout or error; keep waiting.
+        continue;
+      }
+    }
+
     NuiSkeletonFrame native_frame{};
-    HRESULT hr = Vtbl()->NuiSkeletonGetNextFrame(
-        nui_sensor_, 100 /*ms timeout*/, &native_frame);
+    // Use 0 ms timeout when an event handle is available (frame is already
+    // ready); otherwise block for up to 100 ms.
+    DWORD timeout_ms = skeleton_event_ ? 0 : 100;
+    HRESULT hr = Vtbl()->NuiSkeletonGetNextFrame(nui_sensor_, timeout_ms,
+                                                 &native_frame);
     ++poll_count;
     if (SUCCEEDED(hr)) {
       ++frame_count;
+    }
+
+    // Reset the event so we wait for the next frame notification.
+    if (skeleton_event_) {
+      ResetEvent(skeleton_event_);
     }
 
     if (!running_) {
