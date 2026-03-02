@@ -222,16 +222,14 @@ class KinectDevice {
   };
 
   // Kinect NUI initialisation flags for skeleton tracking.
-  // NUI_INITIALIZE_FLAG_USES_DEPTH_AND_PLAYER_INDEX = 0x00000001
-  // NUI_INITIALIZE_FLAG_USES_SKELETON                = 0x00000008
+  // NUI_INITIALIZE_FLAG_USES_SKELETON = 0x00000008
   //
-  // Both flags must be combined.  Skeleton tracking internally relies on the
-  // depth processing pipeline; initialising with the skeleton flag alone
-  // (0x08) causes NuiInitialize to return S_OK yet leaves the depth pipeline
-  // unstarted, which in turn makes NuiSkeletonTrackingEnable return
-  // E_INVALIDARG (0x80070057).  Every official Kinect SDK skeleton sample
-  // uses this combined value (0x09).
-  static constexpr DWORD kNuiInitFlagUseSkeleton = 0x00000009;
+  // Use the skeleton flag alone, matching the official Kinect SDK
+  // SkeletonBasics sample.  Combining it with
+  // NUI_INITIALIZE_FLAG_USES_DEPTH_AND_PLAYER_INDEX (0x01) when no depth
+  // stream is subsequently opened can leave the SDK in an inconsistent state
+  // where NuiSkeletonTrackingEnable returns E_INVALIDARG (0x80070057).
+  static constexpr DWORD kNuiInitFlagUseSkeleton = 0x00000008;
 
   // Skeleton tracking flags.
   static constexpr DWORD kNuiSkeletonTrackingFlagDefault = 0;
@@ -242,7 +240,6 @@ class KinectDevice {
   PFN_NuiCreateSensorByIndex fn_nui_create_sensor_by_index_ = nullptr;
 
   void* nui_sensor_ = nullptr;  // raw INuiSensor* (COM ref held)
-  HANDLE skeleton_event_ = INVALID_HANDLE_VALUE;  // signaled when a new skeleton frame is ready
 
   std::thread poll_thread_;
   std::atomic<bool> running_{false};

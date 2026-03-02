@@ -99,10 +99,10 @@ bool KinectDevice::Initialize() {
   }
   connected_ = true;
 
-  // Initialise with depth+player-index AND skeleton tracking.
-  // The depth flag is required even if we never read depth frames: skeleton
-  // tracking internally uses the depth pipeline, and without it
-  // NuiSkeletonTrackingEnable returns E_INVALIDARG (0x80070057).
+  // Initialise for skeleton tracking only.
+  // NUI_INITIALIZE_FLAG_USES_SKELETON (0x08) is the correct flag for
+  // skeleton-only initialisation, matching the official Kinect SDK
+  // SkeletonBasics sample.
   XELOGI("Kinect: Calling NuiInitialize with flags=0x{:08X}.",
          static_cast<uint32_t>(kNuiInitFlagUseSkeleton));
   hr = Vtbl()->NuiInitialize(nui_sensor_, kNuiInitFlagUseSkeleton);
@@ -115,29 +115,16 @@ bool KinectDevice::Initialize() {
   XELOGI("Kinect: NuiInitialize succeeded (hr=0x{:08X}).",
          static_cast<uint32_t>(hr));
 
-  // Create the skeleton-ready event required by NuiSkeletonTrackingEnable.
-  // The official Kinect SDK samples always pass a real event handle; some
-  // SDK/driver versions reject NULL (0) as E_INVALIDARG because they
-  // distinguish it from INVALID_HANDLE_VALUE as the "no event" sentinel.
-  // Manual-reset (TRUE) so the signal is not auto-cleared between frames;
-  // initially non-signaled (FALSE) since no frame is ready yet.
-  skeleton_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  if (!skeleton_event_) {
-    XELOGW("Kinect: CreateEventW failed (GLE={}); falling back to "
-           "INVALID_HANDLE_VALUE.",
-           GetLastError());
-    skeleton_event_ = INVALID_HANDLE_VALUE;
-  }
-
-  hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, skeleton_event_,
+  // Enable skeleton tracking in polling mode.
+  // Pass INVALID_HANDLE_VALUE as the event handle: this is the SDK-documented
+  // sentinel for "no event / polling mode".  NULL (0) and real event handles
+  // have both been observed to cause E_INVALIDARG on SDK 1.5+ runtimes;
+  // INVALID_HANDLE_VALUE is the correct value per the Kinect SDK 1.8 docs.
+  hr = Vtbl()->NuiSkeletonTrackingEnable(nui_sensor_, INVALID_HANDLE_VALUE,
                                          kNuiSkeletonTrackingFlagDefault);
   if (FAILED(hr)) {
     XELOGE("Kinect: NuiSkeletonTrackingEnable failed (hr=0x{:08X}).",
            static_cast<uint32_t>(hr));
-    if (skeleton_event_ != INVALID_HANDLE_VALUE) {
-      CloseHandle(skeleton_event_);
-      skeleton_event_ = INVALID_HANDLE_VALUE;
-    }
     Vtbl()->NuiShutdown(nui_sensor_);
     return false;
   }
@@ -169,12 +156,6 @@ void KinectDevice::Shutdown() {
     poll_thread_.join();
   }
 
-  // Close the skeleton frame event.
-  if (skeleton_event_ != INVALID_HANDLE_VALUE) {
-    CloseHandle(skeleton_event_);
-    skeleton_event_ = INVALID_HANDLE_VALUE;
-  }
-
   if (nui_sensor_) {
     if (ready_) {
       Vtbl()->NuiSkeletonTrackingDisable(nui_sensor_);
@@ -203,9 +184,8 @@ void KinectDevice::Shutdown() {
 void KinectDevice::PollThread() {
   while (running_) {
     // Poll for the next skeleton frame, blocking for up to 100 ms.
-    // The skeleton_event_ is signaled by the SDK when a new frame is ready,
-    // but we use NuiSkeletonGetNextFrame's built-in timeout instead so the
-    // thread wakes promptly when running_ is cleared.
+    // NuiSkeletonTrackingEnable was called with INVALID_HANDLE_VALUE (polling
+    // mode), so we drive frame delivery entirely via the timeout here.
     NuiSkeletonFrame native_frame{};
     HRESULT hr = Vtbl()->NuiSkeletonGetNextFrame(
         nui_sensor_, 100 /*ms timeout*/, &native_frame);
