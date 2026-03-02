@@ -49,17 +49,19 @@ constexpr uint32_t kNuiDeviceStatusNotConnected = 0;
 constexpr uint32_t kNuiDeviceStatusConnected = 1;
 
 // Xbox 360 XDK system notification IDs for NUI (Kinect) events.
-// Both are broadcast so games compiled against different SDK versions are
-// covered.  mask_index==0 for both, so any listener with bit 0 set in its
-// mask (the common case for XN_SYS_* events) will receive them.
+// NUI notifications belong to notification area 5 (XNOTIFY_NUI), encoded as
+// mask_index=5 in bits [30:25] of the 32-bit notification ID:
+//   0x0A000000 = 5 << 25
+// Listeners that want NUI events must have bit 5 set in their 64-bit mask
+// (i.e. mask & 0x0000000000000020 != 0).
 //
-// XN_SYS_NUI_ENROLLED (0x1E): biometric / face-recognition enrollment change.
+// XN_SYS_NUI_ENROLLED (0x0A00001E): biometric / face-recognition enrollment
+//   change.  data = enrollment_index (0 for first player, 0xFF when cleared).
+// XN_SYS_NUI_ENGAGED  (0x0A00001F): physical player engagement change — a
+//   person has stepped into (or left) the Kinect field of view.
 //   data = enrollment_index (0 for first player, 0xFF when cleared).
-// XN_SYS_NUI_ENGAGED  (0x1F): physical player engagement change — a person
-//   has stepped into (or left) the Kinect field of view.
-//   data = enrollment_index (0 for first player, 0xFF when cleared).
-constexpr uint32_t kXNotifySysNuiEnrolled = 0x0000001E;
-constexpr uint32_t kXNotifySysNuiEngaged  = 0x0000001F;
+constexpr uint32_t kXNotifySysNuiEnrolled = 0x0A00001E;
+constexpr uint32_t kXNotifySysNuiEngaged  = 0x0A00001F;
 
 #if XE_PLATFORM_WIN32
 // Registers the engagement-changed callback on the KinectDevice singleton so
