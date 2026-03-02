@@ -142,6 +142,10 @@ dword_result_t XamNuiIsDeviceReady_entry(dword_t unk) {
   if (!kinect->IsConnected()) {
     kinect->Initialize();
   }
+  // Register the engagement callback here too, because the game may call
+  // XamNuiIsDeviceReady without ever calling XamNuiGetDeviceStatus.  If the
+  // callback is not registered, engagement notifications are never broadcast.
+  EnsureNuiCallbackRegistered();
   if (kinect->IsReady()) {
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true)) {
