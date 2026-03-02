@@ -183,6 +183,10 @@ void KinectDevice::Shutdown() {
 // ---------------------------------------------------------------------------
 
 void KinectDevice::PollThread() {
+  uint64_t poll_count = 0;
+  uint64_t frame_count = 0;
+  HRESULT last_hr = S_OK;
+
   while (running_) {
     // Poll for the next skeleton frame, blocking for up to 100 ms.
     // NuiSkeletonTrackingEnable was called with nullptr; regardless of
@@ -191,9 +195,31 @@ void KinectDevice::PollThread() {
     NuiSkeletonFrame native_frame{};
     HRESULT hr = Vtbl()->NuiSkeletonGetNextFrame(
         nui_sensor_, 100 /*ms timeout*/, &native_frame);
+    ++poll_count;
+    if (SUCCEEDED(hr)) {
+      ++frame_count;
+    }
 
     if (!running_) {
       break;
+    }
+
+    // Log first call result, any HRESULT change, and every 500 polls (~50 s).
+    const bool hr_changed = (hr != last_hr);
+    const bool periodic = (poll_count % 500 == 0);
+    if (poll_count == 1 || hr_changed || periodic) {
+      if (SUCCEEDED(hr)) {
+        XELOGI(
+            "Kinect: NuiSkeletonGetNextFrame OK (hr=0x{:08X}) "
+            "poll#{} frame#{}",
+            static_cast<uint32_t>(hr), poll_count, frame_count);
+      } else {
+        XELOGW(
+            "Kinect: NuiSkeletonGetNextFrame failed (hr=0x{:08X}) "
+            "poll#{} frame#{}",
+            static_cast<uint32_t>(hr), poll_count, frame_count);
+      }
+      last_hr = hr;
     }
 
     if (SUCCEEDED(hr)) {
@@ -208,6 +234,12 @@ void KinectDevice::PollThread() {
         if (first_frame) {
           XELOGI("Kinect: First skeleton frame received (frame #{}).",
                  native_frame.dwFrameNumber);
+          // Dump all 6 skeleton slots so we can see what the sensor sees.
+          for (uint32_t i = 0; i < kNuiSkeletonCount; ++i) {
+            XELOGI("Kinect:   slot[{}] tracking_state={} tracking_id={}",
+                   i, native_frame.SkeletonData[i].eTrackingState,
+                   native_frame.SkeletonData[i].dwTrackingID);
+          }
         }
       }  // frame_mutex_ released before ProcessHudFrame
 
@@ -215,6 +247,9 @@ void KinectDevice::PollThread() {
       ProcessHudFrame(guest_frame);
     }
   }
+
+  XELOGI("Kinect: PollThread exiting (polls={} frames={}).", poll_count,
+         frame_count);
 }
 
 // ---------------------------------------------------------------------------

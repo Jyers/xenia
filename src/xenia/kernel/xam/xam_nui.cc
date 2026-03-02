@@ -83,14 +83,14 @@ dword_result_t XamNuiIsDeviceReady_entry(dword_t unk) {
   if (kinect->IsReady()) {
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true)) {
-      XELOGI("Kinect: XamNuiIsDeviceReady → Ready.");
+      XELOGI("Kinect: XamNuiIsDeviceReady → Ready (first call).");
     }
     return X_ERROR_SUCCESS;
   }
   {
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true)) {
-      XELOGI("Kinect: XamNuiIsDeviceReady → Not ready.");
+      XELOGW("Kinect: XamNuiIsDeviceReady → Not ready (first call).");
     }
   }
 #endif  // XE_PLATFORM_WIN32
@@ -172,6 +172,13 @@ dword_result_t XamNuiSkeletonGetBestSkeletonIndex_entry() {
             static_cast<uint32_t>(frame.skeleton_data[i].tracking_state);
         if (state == X_NUI_SKELETON_TRACKED ||
             state == X_NUI_SKELETON_POSITION_ONLY) {
+          static std::atomic<uint32_t> last_best{KinectDevice::kNoEnrolledPlayer};
+          const uint32_t prev = last_best.exchange(i);
+          if (prev != i) {
+            XELOGI("Kinect: XamNuiSkeletonGetBestSkeletonIndex → {} "
+                   "(state={})",
+                   i, state);
+          }
           return i;
         }
       }
@@ -257,7 +264,34 @@ dword_result_t XamNuiNatalCameraUpdateStarting_entry(
   if (kinect->IsReady()) {
     if (frame_ptr) {
       X_NUI_SKELETON_FRAME frame{};
-      if (kinect->GetSkeletonFrame(&frame)) {
+      const bool has_frame = kinect->GetSkeletonFrame(&frame);
+      {
+        static std::atomic<uint64_t> call_count{0};
+        const uint64_t n = ++call_count;
+        // Log first call and every 500 calls after that.
+        if (n == 1 || n % 500 == 0) {
+          if (has_frame) {
+            // Show tracking states for all 6 skeleton slots.
+            XELOGI(
+                "Kinect: XamNuiNatalCameraUpdateStarting call#{} — "
+                "frame available (frame#={} slot_states=[{},{},{},{},{},{}])",
+                n,
+                static_cast<uint32_t>(frame.frame_number),
+                static_cast<uint32_t>(frame.skeleton_data[0].tracking_state),
+                static_cast<uint32_t>(frame.skeleton_data[1].tracking_state),
+                static_cast<uint32_t>(frame.skeleton_data[2].tracking_state),
+                static_cast<uint32_t>(frame.skeleton_data[3].tracking_state),
+                static_cast<uint32_t>(frame.skeleton_data[4].tracking_state),
+                static_cast<uint32_t>(frame.skeleton_data[5].tracking_state));
+          } else {
+            XELOGW(
+                "Kinect: XamNuiNatalCameraUpdateStarting call#{} — "
+                "no frame yet",
+                n);
+          }
+        }
+      }
+      if (has_frame) {
         *frame_ptr = frame;
         return X_ERROR_SUCCESS;
       }
