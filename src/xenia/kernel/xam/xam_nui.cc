@@ -364,8 +364,8 @@ DECLARE_XAM_EXPORT1(XamNuiHudGetInitializeFlags, kNone, kImplemented);
 // User-NUI binding: associates signed-in user slots with the Kinect sensor.
 // These are required for the engagement pipeline to know which controller
 // slot corresponds to the person standing in front of the sensor.
-// We maintain a simple 1-to-1 mapping (user index == enrollment index) which
-// is the most common case and sufficient for single-player Kinect games.
+// User 0 is dynamically mapped to whichever skeleton slot the engaged person
+// occupies (the Windows Kinect SDK assigns skeletons to arbitrary slots).
 // ---------------------------------------------------------------------------
 
 // Returns the controller slot (user index) that should be bound to the Kinect.
@@ -397,21 +397,53 @@ DECLARE_XAM_EXPORT1(XamUserNuiUnbind, kNone, kStub);
 // Returns the controller slot (user index) for a given enrollment index.
 // enrollment_index is the skeleton slot (0-5); out_user_index receives the
 // controller slot (0-3) bound to that skeleton.
+// The engaged skeleton can be in any slot (the Windows Kinect SDK assigns slots
+// dynamically).  We map only the engaged slot to user 0 and report
+// kNoEnrolledPlayer for all other slots.
 dword_result_t XamUserNuiGetUserIndex_entry(dword_t enrollment_index,
                                              lpdword_t out_user_index) {
   if (out_user_index) {
-    // 1-to-1 mapping: enrollment index == user index.
-    *out_user_index = enrollment_index.value();
+    uint32_t result = KinectDevice::kNoEnrolledPlayer;
+#if XE_PLATFORM_WIN32
+    KinectDevice* kinect = KinectDevice::Get();
+    uint32_t engaged = kinect->GetEngagedEnrollmentIndex();
+    if (engaged != KinectDevice::kNoEnrolledPlayer &&
+        enrollment_index.value() == engaged) {
+      result = 0;  // engaged skeleton maps to user 0
+    }
+#endif
+    static std::atomic<uint32_t> last_result{KinectDevice::kNoEnrolledPlayer};
+    const uint32_t prev = last_result.exchange(result);
+    if (prev != result) {
+      XELOGI("Kinect: XamUserNuiGetUserIndex enrollment_index={} → user={}",
+             enrollment_index.value(), result);
+    }
+    *out_user_index = result;
   }
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamUserNuiGetUserIndex, kNone, kStub);
 
 // Returns the enrollment index (skeleton slot) for a given controller slot.
+// Since the Windows Kinect SDK assigns skeletons to arbitrary slots, we
+// dynamically return the engaged skeleton's actual slot for user 0.
 dword_result_t XamUserNuiGetEnrollmentIndex_entry(dword_t user_index,
                                                    lpdword_t out_enrollment_index) {
   if (out_enrollment_index) {
-    *out_enrollment_index = user_index.value();
+    uint32_t result = KinectDevice::kNoEnrolledPlayer;
+#if XE_PLATFORM_WIN32
+    if (user_index.value() == 0) {
+      KinectDevice* kinect = KinectDevice::Get();
+      result = kinect->GetEngagedEnrollmentIndex();
+    }
+#endif
+    static std::atomic<uint32_t> last_result{KinectDevice::kNoEnrolledPlayer};
+    const uint32_t prev = last_result.exchange(result);
+    if (prev != result) {
+      XELOGI("Kinect: XamUserNuiGetEnrollmentIndex user_index={} → slot={}",
+             user_index.value(), result);
+    }
+    *out_enrollment_index = result;
   }
   return X_ERROR_SUCCESS;
 }

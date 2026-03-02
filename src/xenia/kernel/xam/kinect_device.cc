@@ -461,7 +461,12 @@ void KinectDevice::ConvertFrame(const NuiSkeletonFrame& src,
 
     sdst.tracking_state = ssrc.eTrackingState;
     sdst.tracking_id = ssrc.dwTrackingID;
-    sdst.enrollment_index = ssrc.dwEnrollmentIndex;
+    // Use the slot index as the enrollment index.  The Windows SDK only sets
+    // dwEnrollmentIndex meaningfully after NuiSkeletonSetTrackedSkeletons,
+    // which we never call.  Games expect the enrollment index to identify the
+    // skeleton slot (0-5), and XamUserNuiGetUserIndex / GetEnrollmentIndex are
+    // keyed on this value, so write the slot index unconditionally.
+    sdst.enrollment_index = i;
     sdst.user_index = ssrc.dwUserIndex;
     ConvertVector4(ssrc.Position, &sdst.position);
 
