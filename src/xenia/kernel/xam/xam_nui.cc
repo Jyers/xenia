@@ -57,8 +57,8 @@ constexpr uint32_t kNuiDeviceStatusConnected = 1;
 //
 // XN_SYS_NUI_ENGAGED  (0x0A000003, local_id=3): physical player engagement
 //   change — a person has stepped into (or left) the Kinect field of view.
-//   data = tracking_id of the engaged player (non-zero), or 0 when cleared.
-//   Games check param != 0 to detect engagement.
+//   data = enrollment_index of the engaged player (0 for first player),
+//          or kNoEnrolledPlayer (0xFF) when nobody is engaged.
 // XN_SYS_NUI_ENROLLED (0x0A000002, local_id=2): biometric / face-recognition
 //   enrollment change.
 //   data = enrollment_index (0 for first player, 0xFF when cleared).
@@ -93,10 +93,11 @@ static void EnsureNuiCallbackRegistered() {
               "XN_SYS_NUI_ENROLLED (0x{:08X}) — engagement cleared.",
               kXNotifySysNuiEngaged, kXNotifySysNuiEnrolled);
         }
-        // Broadcast the physical-engagement notification first.
-        // data = tracking_id for ENGAGED (non-zero means someone arrived, 0
-        // means cleared), and enrollment_index for ENROLLED (0xFF = cleared).
-        ks->BroadcastNotification(kXNotifySysNuiEngaged,  tracking_id);
+        // Both notifications carry the enrollment_index as their data
+        // parameter, matching Xbox 360 XDK semantics:
+        //   ENGAGED: enrollment_index (0=first player) or 0xFF when cleared.
+        //   ENROLLED: same semantics.
+        ks->BroadcastNotification(kXNotifySysNuiEngaged,  enrollment_index);
         ks->BroadcastNotification(kXNotifySysNuiEnrolled, enrollment_index);
       });
 }
@@ -373,12 +374,16 @@ DECLARE_XAM_EXPORT1(XamNuiHudGetEngagedEnrollmentIndex, kNone, kImplemented);
 // X_ERROR_DEVICE_NOT_CONNECTED when no data is available.
 dword_result_t XamNuiNatalCameraUpdateStarting_entry(
     pointer_t<X_NUI_SKELETON_FRAME> frame_ptr) {
-  // Always count calls regardless of ready state or null frame_ptr so we
-  // never silently miss calls in diagnostics.
   static std::atomic<uint64_t> call_count{0};
   const uint64_t n = ++call_count;
 #if XE_PLATFORM_WIN32
   KinectDevice* kinect = KinectDevice::Get();
+  // Trigger lazy initialisation here so games that call this function before
+  // XamNuiGetDeviceStatus / XamNuiIsDeviceReady still get skeleton data.
+  if (!kinect->IsConnected()) {
+    kinect->Initialize();
+    EnsureNuiCallbackRegistered();
+  }
   if (kinect->IsReady()) {
     if (frame_ptr) {
       X_NUI_SKELETON_FRAME frame{};
@@ -420,9 +425,10 @@ dword_result_t XamNuiNatalCameraUpdateStarting_entry(
     }
     return X_ERROR_SUCCESS;
   }
-  // Not ready yet — log first occurrence.
+  // Kinect not ready (init failed or no device) — log first occurrence at info
+  // level so it appears in user logs regardless of log-level filter.
   if (n == 1) {
-    XELOGW("Kinect: XamNuiNatalCameraUpdateStarting call#1 — not ready");
+    XELOGI("Kinect: XamNuiNatalCameraUpdateStarting call#1 — device not ready");
   }
 #endif  // XE_PLATFORM_WIN32
   return X_ERROR_DEVICE_NOT_CONNECTED;
