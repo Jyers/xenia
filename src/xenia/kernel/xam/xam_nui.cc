@@ -55,13 +55,14 @@ constexpr uint32_t kNuiDeviceStatusConnected = 1;
 // Listeners that want NUI events must have bit 5 set in their 64-bit mask
 // (i.e. mask & 0x0000000000000020 != 0).
 //
-// XN_SYS_NUI_ENROLLED (0x0A00001E): biometric / face-recognition enrollment
-//   change.  data = enrollment_index (0 for first player, 0xFF when cleared).
-// XN_SYS_NUI_ENGAGED  (0x0A00001F): physical player engagement change — a
-//   person has stepped into (or left) the Kinect field of view.
+// XN_SYS_NUI_ENGAGED  (0x0A000003, local_id=3): physical player engagement
+//   change — a person has stepped into (or left) the Kinect field of view.
 //   data = enrollment_index (0 for first player, 0xFF when cleared).
-constexpr uint32_t kXNotifySysNuiEnrolled = 0x0A00001E;
-constexpr uint32_t kXNotifySysNuiEngaged  = 0x0A00001F;
+// XN_SYS_NUI_ENROLLED (0x0A000002, local_id=2): biometric / face-recognition
+//   enrollment change.
+//   data = enrollment_index (0 for first player, 0xFF when cleared).
+constexpr uint32_t kXNotifySysNuiEngaged  = 0x0A000003;
+constexpr uint32_t kXNotifySysNuiEnrolled = 0x0A000002;
 
 #if XE_PLATFORM_WIN32
 // Registers the engagement-changed callback on the KinectDevice singleton so
@@ -91,9 +92,9 @@ static void EnsureNuiCallbackRegistered() {
               "XN_SYS_NUI_ENROLLED (0x{:08X}) — engagement cleared.",
               kXNotifySysNuiEngaged, kXNotifySysNuiEnrolled);
         }
-        // Broadcast the physical-engagement notification (0x1F) first as it
-        // is the one most games wait for, then the enrollment notification
-        // (0x1E) for games that track biometric/face state.
+        // Broadcast the physical-engagement notification first as it is the
+        // one most games wait for, then the enrollment notification for games
+        // that track biometric/face state.
         ks->BroadcastNotification(kXNotifySysNuiEngaged,  enrollment_index);
         ks->BroadcastNotification(kXNotifySysNuiEnrolled, enrollment_index);
       });
