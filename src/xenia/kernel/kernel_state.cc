@@ -684,6 +684,14 @@ void KernelState::UnregisterNotifyListener(XNotifyListener* listener) {
 
 void KernelState::BroadcastNotification(XNotificationID id, uint32_t data) {
   auto global_lock = global_critical_region_.Acquire();
+  // For NUI (Kinect) engagement notifications, log how many listeners will
+  // receive the broadcast so we can diagnose "zero listeners" cases quickly.
+  // NUI notifications live in area 5 (mask_index=5): 0x0A000000 base.
+  if ((id & 0xFF000000u) == 0x0A000000u) {
+    XELOGI("Kinect: BroadcastNotification id=0x{:08X} data=0x{:08X} "
+           "→ {} registered listener(s)",
+           id, data, notify_listeners_.size());
+  }
   for (const auto& notify_listener : notify_listeners_) {
     notify_listener->EnqueueNotification(id, data);
   }

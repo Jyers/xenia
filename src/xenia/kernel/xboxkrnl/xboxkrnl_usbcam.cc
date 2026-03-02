@@ -37,6 +37,28 @@ dword_result_t XUsbcamGetState_entry() {
 }
 DECLARE_XBOXKRNL_EXPORT1(XUsbcamGetState, kNone, kStub);
 
+// PsCamDeviceRequest is the internal kernel entry point that the Kinect
+// runtime calls to submit I/O requests to the Ps-Cam (Kinect) device driver.
+// We stub it as E_NOTIMPL so the runtime falls back gracefully rather than
+// crashing on an unresolved import.
+dword_result_t PsCamDeviceRequest_entry(dword_t request_code,
+                                         lpvoid_t input_buf,
+                                         dword_t input_size,
+                                         lpvoid_t output_buf,
+                                         dword_t output_size,
+                                         lpdword_t bytes_returned) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: PsCamDeviceRequest request_code=0x{:08X} (first call, not implemented)",
+           request_code.value());
+  }
+  if (bytes_returned) {
+    *bytes_returned = 0;
+  }
+  return X_STATUS_NOT_IMPLEMENTED;
+}
+DECLARE_XBOXKRNL_EXPORT1(PsCamDeviceRequest, kNone, kStub);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe
