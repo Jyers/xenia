@@ -883,6 +883,115 @@ dword_result_t XamUserNuiEnableBiometric_entry(dword_t user_index,
 }
 DECLARE_XAM_EXPORT1(XamUserNuiEnableBiometric, kNone, kStub);
 
+// ---------------------------------------------------------------------------
+// NUI overlay UI functions.
+// These display Kinect-specific system overlays (sign-in, guide, etc.).
+// We log on first call (under the Kinect category so the user can filter)
+// and immediately return success so the game continues.
+// ---------------------------------------------------------------------------
+
+dword_result_t XamShowNuiGuideUI_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiGuideUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiGuideUI, kNone, kStub);
+
+dword_result_t XamShowNuiSigninUI_entry(dword_t user_index, dword_t unk) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiSigninUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiSigninUI, kNone, kStub);
+
+dword_result_t XamShowNuiControllerRequiredUI_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiControllerRequiredUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiControllerRequiredUI, kNone, kStub);
+
+dword_result_t XamShowNuiHardwareRequiredUI_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiHardwareRequiredUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiHardwareRequiredUI, kNone, kStub);
+
+dword_result_t XamShowNuiFriendsUI_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiFriendsUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiFriendsUI, kNone, kStub);
+
+dword_result_t XamShowNuiGamerCardUIForXUID_entry(dword_t user_index,
+                                                   lpqword_t xuid_ptr) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiGamerCardUIForXUID user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiGamerCardUIForXUID, kNone, kStub);
+
+dword_result_t XamShowNuiAchievementsUI_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiAchievementsUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiAchievementsUI, kNone, kStub);
+
+dword_result_t XamShowNuiMarketplaceUI_entry(dword_t user_index,
+                                              dword_t offer_id) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiMarketplaceUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiMarketplaceUI, kNone, kStub);
+
+dword_result_t XamShowNuiDeviceSelectorUI_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiDeviceSelectorUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiDeviceSelectorUI, kNone, kStub);
+
+dword_result_t XamShowNuiDirtyDiscErrorUI_entry(dword_t user_index) {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    XELOGI("Kinect: XamShowNuiDirtyDiscErrorUI user_index={} (first call, dismissed)",
+           user_index.value());
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiDirtyDiscErrorUI, kNone, kStub);
+
 dword_result_t XamShowNuiTroubleshooterUI_entry(unknown_t unk1, unknown_t unk2,
                                                 unknown_t unk3) {
   // unk1 is 0xFF - possibly user index?
