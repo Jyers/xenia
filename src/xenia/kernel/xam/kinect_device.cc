@@ -345,7 +345,10 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
           static_cast<uint32_t>(frame.skeleton_data[i].tracking_id);
       if (tid != 0) {
         best_tracking_id = tid;
-        best_enrollment_index = i;
+        // Use the enrollment_index that ConvertFrame assigned (0 for first
+        // tracked player, 1 for second) — not the raw slot index.
+        best_enrollment_index =
+            static_cast<uint32_t>(frame.skeleton_data[i].enrollment_index);
         break;
       }
     }
@@ -361,7 +364,8 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
             static_cast<uint32_t>(frame.skeleton_data[i].tracking_id);
         if (tid != 0) {
           best_tracking_id = tid;
-          best_enrollment_index = i;
+          best_enrollment_index =
+              static_cast<uint32_t>(frame.skeleton_data[i].enrollment_index);
           break;
         }
       }
@@ -371,7 +375,7 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
   std::lock_guard<std::mutex> lock(frame_mutex_);
   if (best_tracking_id != engaged_tracking_id_) {
     if (best_tracking_id != 0) {
-      XELOGI("Kinect: Person detected — engaged tracking_id={} slot={}",
+      XELOGI("Kinect: Person detected — engaged tracking_id={} enrollment={}",
              best_tracking_id, best_enrollment_index);
     } else {
       XELOGI("Kinect: Person left — engagement cleared.");
@@ -394,13 +398,15 @@ void KinectDevice::SetEngagedTrackingId(uint32_t tracking_id) {
     engaged_enrollment_index_ = kNoEnrolledPlayer;
   } else {
     // Try to find the matching skeleton in the latest frame so the enrollment
-    // index stays consistent with the tracking ID.
-    engaged_enrollment_index_ = 0;  // default to slot 0 if not found
+    // index stays consistent with the tracking ID.  Default to 0 (first player)
+    // if the skeleton is temporarily absent from the current frame.
+    engaged_enrollment_index_ = 0;
     if (has_frame_) {
       for (uint32_t i = 0; i < kNuiSkeletonCount; ++i) {
         if (static_cast<uint32_t>(latest_frame_.skeleton_data[i].tracking_id) ==
             tracking_id) {
-          engaged_enrollment_index_ = i;
+          engaged_enrollment_index_ =
+              static_cast<uint32_t>(latest_frame_.skeleton_data[i].enrollment_index);
           break;
         }
       }
@@ -455,18 +461,25 @@ void KinectDevice::ConvertFrame(const NuiSkeletonFrame& src,
   ConvertVector4(src.vFloorClipPlane, &dst->floor_clip_plane);
   ConvertVector4(src.vNormalToGravity, &dst->normal_to_gravity);
 
+  // Assign enrollment indices sequentially: 0 for the first tracked skeleton,
+  // 1 for the second, 0xFFFFFFFF for untracked slots.  The Xbox 360 SDK always
+  // uses this scheme regardless of which array slot a skeleton occupies.  The
+  // Windows SDK's dwEnrollmentIndex is only meaningful after a
+  // NuiSkeletonSetTrackedSkeletons call (which we never make), so we ignore it
+  // and compute our own sequential indices instead.  Games scan skeleton_data[]
+  // looking for enrollment_index==0 to find the first player; writing the slot
+  // index here means the game would find an untracked entry at index 0 and
+  // see nobody.
+  uint32_t next_enrollment = 0;
   for (uint32_t i = 0; i < kNuiSkeletonCount; ++i) {
     const NuiSkeletonData& ssrc = src.SkeletonData[i];
     X_NUI_SKELETON_DATA& sdst = dst->skeleton_data[i];
 
     sdst.tracking_state = ssrc.eTrackingState;
     sdst.tracking_id = ssrc.dwTrackingID;
-    // Use the slot index as the enrollment index.  The Windows SDK only sets
-    // dwEnrollmentIndex meaningfully after NuiSkeletonSetTrackedSkeletons,
-    // which we never call.  Games expect the enrollment index to identify the
-    // skeleton slot (0-5), and XamUserNuiGetUserIndex / GetEnrollmentIndex are
-    // keyed on this value, so write the slot index unconditionally.
-    sdst.enrollment_index = i;
+    const bool is_tracked = (ssrc.eTrackingState != kNuiSkeletonNotTracked) &&
+                            (ssrc.dwTrackingID != 0);
+    sdst.enrollment_index = is_tracked ? next_enrollment++ : 0xFFFFFFFF;
     sdst.user_index = ssrc.dwUserIndex;
     ConvertVector4(ssrc.Position, &sdst.position);
 
