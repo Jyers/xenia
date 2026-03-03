@@ -17,7 +17,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -123,12 +122,10 @@ class KinectDevice {
   static constexpr uint32_t kNoEnrolledPlayer = 0xFF;
   uint32_t GetEngagedEnrollmentIndex() const;
 
-  // Callback type fired (from the poll thread) when the engagement state
-  // changes.  The arguments are the new tracking_id (0 = nobody) and the new
-  // enrollment_index (kNoEnrolledPlayer when nobody is engaged).
-  using EngagementChangedCallback =
-      std::function<void(uint32_t tracking_id, uint32_t enrollment_index)>;
-  void SetEngagementChangedCallback(EngagementChangedCallback cb);
+  // Broadcasts NUI engagement notifications to the kernel notification
+  // system.  Called from the poll thread when the engagement state changes.
+  // Must be called after kernel_state() is valid.
+  void EnableNotificationBroadcast();
 
   // Camera elevation angle in degrees [-27, 27].
   long GetCameraElevationAngle() const;
@@ -238,8 +235,9 @@ class KinectDevice {
   uint32_t engaged_tracking_id_ = 0;
   uint32_t engaged_enrollment_index_ = kNoEnrolledPlayer;
 
-  // Optional callback fired whenever the engagement state changes.
-  EngagementChangedCallback engagement_changed_callback_;
+  // When true, engagement changes are broadcast as NUI notifications
+  // via the kernel's notification system.
+  bool broadcast_notifications_ = false;
 
   bool connected_ = false;
   bool nui_initialized_ = false;  // true once NuiInitialize has succeeded
