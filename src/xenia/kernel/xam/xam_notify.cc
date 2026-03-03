@@ -14,9 +14,6 @@
 #include "xenia/kernel/xnotifylistener.h"
 #include "xenia/xbox.h"
 
-#include <mutex>
-#include <unordered_set>
-
 namespace xe {
 namespace kernel {
 namespace xam {
@@ -35,13 +32,6 @@ uint32_t xeXamNotifyCreateListener(uint64_t mask, uint32_t is_system,
 
   // Handle ref is incremented, so return that.
   uint32_t handle = listener->handle();
-
-  // Log every listener registration so the NUI notification mask is visible
-  // when the user filters by "kinect".
-  XELOGI(
-      "Kinect: XamNotifyCreateListener mask=0x{:016X} "
-      "max_version={} is_system={} → handle=0x{:08X}",
-      mask, max_version, is_system, handle);
 
   return handle;
 }
@@ -78,23 +68,6 @@ dword_result_t XNotifyGetNext_entry(dword_t handle, dword_t match_id,
     return 0;
   }
 
-  // Log the first time each unique match_id is seen so the user can see
-  // what specific notification IDs the game is waiting for (visible when
-  // filtering by "kinect").
-  if (match_id) {
-    static std::mutex seen_mutex;
-    static std::unordered_set<uint32_t> seen_match_ids;
-    {
-      std::lock_guard<std::mutex> lock(seen_mutex);
-      if (seen_match_ids.insert(match_id.value()).second) {
-        XELOGI(
-            "Kinect: XNotifyGetNext match_id=0x{:08X} (new ID seen — game is "
-            "waiting for this specific notification)",
-            match_id.value());
-      }
-    }
-  }
-
   bool dequeued = false;
   uint32_t id = 0;
   uint32_t param = 0;
@@ -105,14 +78,6 @@ dword_result_t XNotifyGetNext_entry(dword_t handle, dword_t match_id,
   } else {
     // Just get next.
     dequeued = listener->DequeueNotification(&id, &param);
-  }
-
-  if (dequeued) {
-    // Log every successfully dequeued notification so the user can see the
-    // notification flow when filtering by "kinect".
-    XELOGI(
-        "Kinect: XNotifyGetNext dequeued id=0x{:08X} param=0x{:08X}",
-        id, param);
   }
 
   *id_ptr = dequeued ? id : 0;

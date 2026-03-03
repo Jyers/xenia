@@ -12,10 +12,15 @@
 #if XE_PLATFORM_WIN32
 
 #include "xenia/base/logging.h"
+#include "xenia/kernel/kernel_state.h"
 
 namespace xe {
 namespace kernel {
 namespace xam {
+
+// Xbox 360 XDK NUI notification IDs (area 5 = mask_index 5).
+static constexpr uint32_t kXNotifySysNuiEngaged  = 0x0A000003;
+static constexpr uint32_t kXNotifySysNuiEnrolled = 0x0A000002;
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -345,8 +350,6 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
           static_cast<uint32_t>(frame.skeleton_data[i].tracking_id);
       if (tid != 0) {
         best_tracking_id = tid;
-        // Use the enrollment_index that ConvertFrame assigned (0 for first
-        // tracked player, 1 for second) — not the raw slot index.
         best_enrollment_index =
             static_cast<uint32_t>(frame.skeleton_data[i].enrollment_index);
         break;
@@ -373,13 +376,13 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
   }
 
   bool engagement_changed = false;
+  bool now_engaged = false;
   uint32_t new_enrollment = kNoEnrolledPlayer;
-  EngagementChangedCallback cb;
   {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     if (best_tracking_id != engaged_tracking_id_) {
       if (best_tracking_id != 0) {
-        XELOGI("Kinect: Person detected — engaged tracking_id={} enrollment={}",
+        XELOGI("Kinect: Person detected — tracking_id={} enrollment={}",
                best_tracking_id, best_enrollment_index);
       } else {
         XELOGI("Kinect: Person left — engagement cleared.");
@@ -388,13 +391,22 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
       engaged_enrollment_index_ =
           (best_tracking_id != 0) ? best_enrollment_index : kNoEnrolledPlayer;
       new_enrollment = engaged_enrollment_index_;
+      now_engaged = (best_tracking_id != 0);
       engagement_changed = true;
-      cb = engagement_changed_callback_;
     }
   }
-  // Fire callback outside the lock to avoid potential deadlocks.
-  if (engagement_changed && cb) {
-    cb(best_tracking_id, new_enrollment);
+
+  // Broadcast NUI notifications directly to the kernel notification system.
+  // This avoids callback indirection which could lose parameter values.
+  if (engagement_changed && broadcast_notifications_) {
+    KernelState* ks = kernel_state();
+    if (ks) {
+      // ENGAGED: data=1 when someone steps in, data=0 when they leave.
+      // Games check (param != 0) to detect engagement.
+      uint32_t engaged_data = now_engaged ? 1u : 0u;
+      ks->BroadcastNotification(kXNotifySysNuiEngaged, engaged_data);
+      ks->BroadcastNotification(kXNotifySysNuiEnrolled, new_enrollment);
+    }
   }
 }
 
@@ -431,9 +443,9 @@ uint32_t KinectDevice::GetEngagedEnrollmentIndex() const {
   return engaged_enrollment_index_;
 }
 
-void KinectDevice::SetEngagementChangedCallback(EngagementChangedCallback cb) {
+void KinectDevice::EnableNotificationBroadcast() {
   std::lock_guard<std::mutex> lock(frame_mutex_);
-  engagement_changed_callback_ = std::move(cb);
+  broadcast_notifications_ = true;
 }
 
 long KinectDevice::GetCameraElevationAngle() const {

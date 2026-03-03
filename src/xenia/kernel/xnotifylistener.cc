@@ -37,25 +37,10 @@ void XNotifyListener::EnqueueNotification(XNotificationID id, uint32_t data) {
   auto key = XNotificationKey(id);
   // Ignore if the notification doesn't match our mask.
   if ((mask_ & uint64_t(1ULL << key.mask_index)) == 0) {
-    // For NUI notifications (area 5, 0x0A000000 base), log the reason so the
-    // user can see why the notification was filtered when debugging Kinect.
-    if ((id & 0xFF000000u) == 0x0A000000u) {
-      XELOGI(
-          "Kinect: EnqueueNotification id=0x{:08X} FILTERED — mask_index={} "
-          "not set in listener mask=0x{:016X}",
-          id, key.mask_index, mask_);
-    }
     return;
   }
   // Ignore if the notification is too new.
   if (key.version > max_version_) {
-    // Same filtering log for NUI notifications.
-    if ((id & 0xFF000000u) == 0x0A000000u) {
-      XELOGI(
-          "Kinect: EnqueueNotification id=0x{:08X} FILTERED — version={} "
-          "> listener max_version={}",
-          id, key.version, max_version_);
-    }
     return;
   }
   auto global_lock = global_critical_region_.Acquire();
