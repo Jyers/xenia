@@ -48,8 +48,9 @@ static_assert(sizeof(X_NUI_DEVICE_STATUS) == 24, "Size matters");
 constexpr uint32_t kNuiDeviceStatusNotConnected = 0;
 constexpr uint32_t kNuiDeviceStatusConnected = 1;
 
-// Enrollment index used when no player is enrolled (matches
-// KinectDevice::kNoEnrolledPlayer on Win32).
+// Enrollment index used when no player is enrolled.  Defined separately from
+// KinectDevice::kNoEnrolledPlayer because KinectDevice is Win32-only, but
+// the NUI stubs below must compile on all platforms.
 constexpr uint32_t kNoEnrolledPlayer = 0xFF;
 
 // NUI notifications are broadcast directly by KinectDevice::ProcessHudFrame

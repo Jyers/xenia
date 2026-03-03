@@ -402,7 +402,9 @@ void KinectDevice::ProcessHudFrame(const X_NUI_SKELETON_FRAME& frame) {
     KernelState* ks = kernel_state();
     if (ks) {
       // ENGAGED: data=1 when someone steps in, data=0 when they leave.
-      // Games check (param != 0) to detect engagement.
+      // On Xbox 360 hardware, games check (param != 0) to detect engagement;
+      // a simple boolean is used rather than the tracking_id because the game
+      // retrieves the specific tracking ID via XamNuiHudGetEngagedTrackingID.
       uint32_t engaged_data = now_engaged ? 1u : 0u;
       ks->BroadcastNotification(kXNotifySysNuiEngaged, engaged_data);
       ks->BroadcastNotification(kXNotifySysNuiEnrolled, new_enrollment);
